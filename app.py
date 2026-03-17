@@ -896,19 +896,19 @@ def _render_market_comparison(prediction: MatchupPrediction, espn_odds: dict | N
                 # Both are now from team_a perspective:
                 #   negative = team_a favored, positive = team_a underdog
                 edge = model_spread - mkt_spread_a
-                # positive edge = model thinks team_a should be getting MORE points
-                #   → take team_a (the underdog side / getting points)
-                # negative edge = model thinks team_a should be giving FEWER points
-                #   → take team_b (the underdog side / getting points)
+                # positive edge = model thinks team_a is MORE of an underdog than market
+                #   → market underrates the favorite → take team_b (the favorite)
+                # negative edge = model thinks team_a is LESS of an underdog than market
+                #   → market overrates the favorite → take team_a (the underdog)
 
                 if abs(edge) >= 1.5:
                     if edge > 0:
-                        pick_team = name_a
-                        reasoning = f"Market has {spread_detail}, but model says the fair line is {name_a} {model_spread:+.1f} — {abs(edge):.1f} pts of value on {name_a}"
-                    else:
                         pick_team = name_b
                         reasoning = f"Market has {spread_detail}, but model says the fair line is {name_a} {model_spread:+.1f} — {abs(edge):.1f} pts of value on {name_b}"
-                    st.markdown(_pick_html(f"Take {pick_team} {spread_detail}", reasoning, True), unsafe_allow_html=True)
+                    else:
+                        pick_team = name_a
+                        reasoning = f"Market has {spread_detail}, but model says the fair line is {name_a} {model_spread:+.1f} — {abs(edge):.1f} pts of value on {name_a}"
+                    st.markdown(_pick_html(f"Take {pick_team}", reasoning, True), unsafe_allow_html=True)
                 else:
                     st.markdown(_pick_html(f"Spread: {spread_detail}", f"Model line: {name_a} {model_spread:+.1f} — no significant edge ({edge:+.1f})", False), unsafe_allow_html=True)
             else:
