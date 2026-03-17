@@ -279,6 +279,7 @@ with st.sidebar:
     st.divider()
     if st.button("🔄 Refresh Data", use_container_width=True):
         st.cache_data.clear()
+        st.session_state["_lock_stale"] = True
         st.rerun()
     st.caption(f"Last refreshed: {datetime.now().strftime('%I:%M %p ET')}")
 
@@ -1222,6 +1223,155 @@ with tab_live:
 # Tab 2: Lock It In
 # ===========================================================================
 
+def _build_lock_picks(games: list, ts: dict, m_odds: dict) -> list[dict]:
+    """Compute all Lock It In picks — called once then cached in session state."""
+    picks: list[dict] = []
+
+    upcoming = espn_client.filter_games(games, status_filter="Upcoming")
+    if not upcoming:
+        upcoming = games
+
+    for g in upcoming:
+        try:
+            home = g.get("home_team", {})
+            away = g.get("away_team", {})
+
+            norm_a = normalize(away.get("name", ""))
+            norm_b = normalize(home.get("name", ""))
+            sa = ts.get(norm_a) or (ts.get(fuzzy_match(norm_a, list(ts.keys()))) if ts else None)
+            sb = ts.get(norm_b) or (ts.get(fuzzy_match(norm_b, list(ts.keys()))) if ts else None)
+            if not sa or not sb:
+                continue
+
+            sa = dict(sa)
+            sb = dict(sb)
+            sa.setdefault("team", away.get("name", "Team A"))
+            sb.setdefault("team", home.get("name", "Team B"))
+            if away.get("seed"):
+                sa["seed"] = away["seed"]
+            if home.get("seed"):
+                sb["seed"] = home["seed"]
+
+            pred = predict_matchup(sa, sb)
+            name_a = sa["team"]
+            name_b = sb["team"]
+
+            entry = {
+                "game": g,
+                "pred": pred,
+                "name_a": name_a,
+                "name_b": name_b,
+                "confidence_prob": max(pred.formula.win_prob_a, pred.formula.win_prob_b),
+                "winner": pred.formula.predicted_winner,
+                "formula_conf": pred.formula.confidence,
+                "margin": abs(pred.formula.margin),
+                "picks_list": [],
+            }
+
+            espn_odds = g.get("odds")
+            mb = None
+            if m_odds:
+                key = f"{away.get('name', '').lower()} vs {home.get('name', '').lower()}"
+                mb = m_odds.get(key)
+                if mb is None:
+                    for k, v in m_odds.items():
+                        if away.get("name", "").lower() in k and home.get("name", "").lower() in k:
+                            mb = v
+                            break
+
+            _books: list[tuple[str, dict]] = []
+            if espn_odds and (espn_odds.get("spread") is not None or espn_odds.get("ml_home")):
+                _books.append(("DraftKings", {
+                    "spread_away": espn_odds.get("spread_away_line"),
+                    "ml_home": espn_odds.get("ml_home", ""),
+                    "ml_away": espn_odds.get("ml_away", ""),
+                    "total": espn_odds.get("over_under"),
+                }))
+            if mb:
+                for bk_key in ["draftkings", "fanduel"]:
+                    if bk_key in mb:
+                        bkd = mb[bk_key]
+                        raw_sp = bkd.get("spread")
+                        _books.append((bkd.get("name", bk_key.title()), {
+                            "spread_away": -raw_sp if raw_sp is not None else None,
+                            "ml_home": str(bkd.get("ml_home", "")),
+                            "ml_away": str(bkd.get("ml_away", "")),
+                            "total": bkd.get("total"),
+                        }))
+
+            model_spread = pred.formula.fair_spread
+            model_total = pred.formula.total
+            model_prob_a = pred.formula.win_prob_a
+
+            for bk_name, bk_data in _books:
+                msa = bk_data.get("spread_away")
+                if msa is not None:
+                    try:
+                        msa = float(msa)
+                    except (TypeError, ValueError):
+                        msa = None
+                if msa is not None:
+                    sp_edge = model_spread - msa
+                    if abs(sp_edge) >= 2.5:
+                        pick_team = name_b if sp_edge > 0 else name_a
+                        mkt_fav = name_b if msa > 0 else name_a
+                        entry["picks_list"].append({
+                            "type": "Spread",
+                            "book": bk_name,
+                            "pick": f"Take {pick_team}",
+                            "edge": abs(sp_edge),
+                            "detail": f"Market: {mkt_fav} -{abs(msa):.1f} · Model fair: {abs(model_spread):.1f}",
+                        })
+
+                ml_h = bk_data.get("ml_home", "")
+                ml_a = bk_data.get("ml_away", "")
+                model_winner = pred.formula.predicted_winner
+                model_prob = model_prob_a if model_winner == name_a else (1 - model_prob_a)
+                market_ml = ml_a if model_winner == name_a else ml_h
+                if market_ml:
+                    try:
+                        mkt_ml_val = float(str(market_ml).replace("EVEN", "100").replace("+", ""))
+                        implied = 100 / (mkt_ml_val + 100) if mkt_ml_val >= 0 else abs(mkt_ml_val) / (abs(mkt_ml_val) + 100)
+                        ml_edge_pct = (model_prob - implied) * 100
+                        if ml_edge_pct > 5:
+                            entry["picks_list"].append({
+                                "type": "Moneyline",
+                                "book": bk_name,
+                                "pick": f"Take {model_winner} ML ({market_ml})",
+                                "edge": ml_edge_pct,
+                                "detail": f"Model: {model_prob:.0%} · Implied: {implied:.0%} · {ml_edge_pct:.1f}% edge",
+                            })
+                    except (ValueError, ZeroDivisionError):
+                        pass
+
+                mkt_total = bk_data.get("total")
+                if mkt_total is not None:
+                    try:
+                        mkt_total = float(mkt_total)
+                    except (TypeError, ValueError):
+                        mkt_total = None
+                if mkt_total is not None:
+                    total_edge = model_total - mkt_total
+                    if abs(total_edge) >= 4.0:
+                        direction = "OVER" if total_edge > 0 else "UNDER"
+                        entry["picks_list"].append({
+                            "type": "Total",
+                            "book": bk_name,
+                            "pick": f"Take the {direction} {mkt_total}",
+                            "edge": abs(total_edge),
+                            "detail": f"Model projects {model_total:.0f} total · {abs(total_edge):.1f} pts of value",
+                        })
+
+            if entry["picks_list"] or entry["formula_conf"] in ("Strong Lean", "Solid"):
+                picks.append(entry)
+
+        except Exception:
+            continue
+
+    picks.sort(key=lambda p: (-p["confidence_prob"], -len(p["picks_list"])))
+    return picks
+
+
 with tab_locks:
     st.markdown("### 🔒 Lock It In")
     st.caption("High-confidence picks across every game — the model's best bets where the line doesn't match the stats.")
@@ -1231,146 +1381,13 @@ with tab_locks:
     elif not team_stats:
         st.info("No team data loaded. Connect KenPom API or upload a CSV.")
     else:
-        _upcoming_games = espn_client.filter_games(all_games, status_filter="Upcoming")
-        if not _upcoming_games:
-            _upcoming_games = all_games
+        _lock_cache_key = "_lock_picks"
+        if _lock_cache_key not in st.session_state or st.session_state.get("_lock_stale", True):
+            with st.spinner("Crunching picks across all games..."):
+                st.session_state[_lock_cache_key] = _build_lock_picks(all_games, team_stats, multi_odds)
+                st.session_state["_lock_stale"] = False
 
-        picks: list[dict] = []
-
-        for g in _upcoming_games:
-            try:
-                home = g.get("home_team", {})
-                away = g.get("away_team", {})
-                sa = _lookup_team(away.get("name", ""))
-                sb = _lookup_team(home.get("name", ""))
-                if not sa or not sb:
-                    continue
-
-                sa = dict(sa)
-                sb = dict(sb)
-                sa.setdefault("team", away.get("name", "Team A"))
-                sb.setdefault("team", home.get("name", "Team B"))
-                if away.get("seed"):
-                    sa["seed"] = away["seed"]
-                if home.get("seed"):
-                    sb["seed"] = home["seed"]
-
-                pred = predict_matchup(sa, sb)
-                name_a = sa["team"]
-                name_b = sb["team"]
-
-                entry = {
-                    "game": g,
-                    "pred": pred,
-                    "name_a": name_a,
-                    "name_b": name_b,
-                    "stats_a": sa,
-                    "stats_b": sb,
-                    "confidence_prob": max(pred.formula.win_prob_a, pred.formula.win_prob_b),
-                    "winner": pred.formula.predicted_winner,
-                    "formula_conf": pred.formula.confidence,
-                    "margin": abs(pred.formula.margin),
-                    "picks_list": [],
-                }
-
-                espn_odds = g.get("odds")
-                mb = _get_multi_book_odds(away.get("name", ""), home.get("name", ""))
-
-                # Gather book data
-                _books: list[tuple[str, dict]] = []
-                if espn_odds and (espn_odds.get("spread") is not None or espn_odds.get("ml_home")):
-                    _books.append(("DraftKings", {
-                        "spread_away": espn_odds.get("spread_away_line"),
-                        "ml_home": espn_odds.get("ml_home", ""),
-                        "ml_away": espn_odds.get("ml_away", ""),
-                        "total": espn_odds.get("over_under"),
-                    }))
-                if mb:
-                    for bk_key in ["draftkings", "fanduel"]:
-                        if bk_key in mb:
-                            bkd = mb[bk_key]
-                            raw_sp = bkd.get("spread")
-                            _books.append((bkd.get("name", bk_key.title()), {
-                                "spread_away": -raw_sp if raw_sp is not None else None,
-                                "ml_home": str(bkd.get("ml_home", "")),
-                                "ml_away": str(bkd.get("ml_away", "")),
-                                "total": bkd.get("total"),
-                            }))
-
-                model_spread = pred.formula.fair_spread
-                model_total = pred.formula.total
-                model_prob_a = pred.formula.win_prob_a
-
-                for bk_name, bk_data in _books:
-                    # Spread edge
-                    msa = bk_data.get("spread_away")
-                    if msa is not None:
-                        try:
-                            msa = float(msa)
-                        except (TypeError, ValueError):
-                            msa = None
-                    if msa is not None:
-                        sp_edge = model_spread - msa
-                        if abs(sp_edge) >= 2.5:
-                            pick_team = name_b if sp_edge > 0 else name_a
-                            mkt_fav = name_b if msa > 0 else name_a
-                            entry["picks_list"].append({
-                                "type": "Spread",
-                                "book": bk_name,
-                                "pick": f"Take {pick_team}",
-                                "edge": abs(sp_edge),
-                                "detail": f"Market: {mkt_fav} -{abs(msa):.1f} · Model fair: {abs(model_spread):.1f}",
-                            })
-
-                    # ML edge
-                    ml_h = bk_data.get("ml_home", "")
-                    ml_a = bk_data.get("ml_away", "")
-                    model_winner = pred.formula.predicted_winner
-                    model_prob = model_prob_a if model_winner == name_a else (1 - model_prob_a)
-                    market_ml = ml_a if model_winner == name_a else ml_h
-                    if market_ml:
-                        try:
-                            mkt_ml_val = float(str(market_ml).replace("EVEN", "100").replace("+", ""))
-                            implied = 100 / (mkt_ml_val + 100) if mkt_ml_val >= 0 else abs(mkt_ml_val) / (abs(mkt_ml_val) + 100)
-                            ml_edge_pct = (model_prob - implied) * 100
-                            if ml_edge_pct > 5:
-                                entry["picks_list"].append({
-                                    "type": "Moneyline",
-                                    "book": bk_name,
-                                    "pick": f"Take {model_winner} ML ({market_ml})",
-                                    "edge": ml_edge_pct,
-                                    "detail": f"Model: {model_prob:.0%} · Implied: {implied:.0%} · {ml_edge_pct:.1f}% edge",
-                                })
-                        except (ValueError, ZeroDivisionError):
-                            pass
-
-                    # Total edge
-                    mkt_total = bk_data.get("total")
-                    if mkt_total is not None:
-                        try:
-                            mkt_total = float(mkt_total)
-                        except (TypeError, ValueError):
-                            mkt_total = None
-                    if mkt_total is not None:
-                        total_edge = model_total - mkt_total
-                        if abs(total_edge) >= 4.0:
-                            direction = "OVER" if total_edge > 0 else "UNDER"
-                            entry["picks_list"].append({
-                                "type": "Total",
-                                "book": bk_name,
-                                "pick": f"Take the {direction} {mkt_total}",
-                                "edge": abs(total_edge),
-                                "detail": f"Model projects {model_total:.0f} total · {abs(total_edge):.1f} pts of value",
-                            })
-
-                if entry["picks_list"] or entry["formula_conf"] in ("Strong Lean", "Solid"):
-                    picks.append(entry)
-
-            except Exception:
-                continue
-
-        # Sort by confidence, then by number of picks
-        picks.sort(key=lambda p: (-p["confidence_prob"], -len(p["picks_list"])))
+        picks = list(st.session_state[_lock_cache_key])
 
         if not picks:
             st.info("No high-confidence picks right now. Check back closer to game time when odds are posted.")
@@ -1829,6 +1846,6 @@ st.markdown(f"""
 @st.fragment(run_every=120)
 def _auto_refresh():
     """Silent fragment that triggers a cache-busting rerun on interval."""
-    pass
+    st.session_state["_lock_stale"] = True
 
 _auto_refresh()
