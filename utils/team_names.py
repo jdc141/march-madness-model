@@ -68,6 +68,81 @@ _ALIAS_MAP: dict[str, list[str]] = {
     "High Point": ["High Point Panthers"],
     "Queens": ["Queens University", "Queens University Royals", "Queens (NC)"],
     "Cal Baptist": ["California Baptist", "California Baptist Lancers", "CBU"],
+
+    # --- "State" schools: ESPN uses "X State Mascots", KenPom uses "X St." ---
+    "Michigan St.": ["Michigan State", "Michigan State Spartans"],
+    "Ohio St.": ["Ohio State", "Ohio State Buckeyes"],
+    "Iowa St.": ["Iowa State", "Iowa State Cyclones"],
+    "Kansas St.": ["Kansas State", "Kansas State Wildcats"],
+    "Florida St.": ["Florida State", "Florida State Seminoles"],
+    "Oklahoma St.": ["Oklahoma State", "Oklahoma State Cowboys"],
+    "Oregon St.": ["Oregon State", "Oregon State Beavers"],
+    "Penn St.": ["Penn State", "Penn State Nittany Lions"],
+    "Arizona St.": ["Arizona State", "Arizona State Sun Devils"],
+    "Mississippi St.": ["Mississippi State", "Mississippi State Bulldogs"],
+    "Colorado St.": ["Colorado State", "Colorado State Rams"],
+    "San Diego St.": ["San Diego State", "San Diego State Aztecs"],
+    "Utah St.": ["Utah State", "Utah State Aggies"],
+    "Boise St.": ["Boise State", "Boise State Broncos"],
+    "Fresno St.": ["Fresno State", "Fresno State Bulldogs"],
+    "Norfolk St.": ["Norfolk State", "Norfolk State Spartans"],
+    "North Dakota St.": ["North Dakota State", "North Dakota State Bison"],
+    "South Dakota St.": ["South Dakota State", "South Dakota State Jackrabbits"],
+    "New Mexico St.": ["New Mexico State", "New Mexico State Aggies"],
+    "Georgia St.": ["Georgia State", "Georgia State Panthers"],
+    "Indiana St.": ["Indiana State", "Indiana State Sycamores"],
+    "Jacksonville St.": ["Jacksonville State", "Jacksonville State Gamecocks"],
+    "Morehead St.": ["Morehead State", "Morehead State Eagles"],
+    "Northern Kentucky": ["Northern Kentucky Norse"],
+    "Cleveland St.": ["Cleveland State", "Cleveland State Vikings"],
+    "Montana St.": ["Montana State", "Montana State Bobcats"],
+    "Illinois St.": ["Illinois State", "Illinois State Redbirds"],
+    "Alabama St.": ["Alabama State", "Alabama State Hornets"],
+    "Arkansas St.": ["Arkansas State", "Arkansas State Red Wolves"],
+    "Washington St.": ["Washington State", "Washington State Cougars"],
+    "Long Beach St.": ["Long Beach State", "Long Beach State Beach"],
+    "Portland St.": ["Portland State", "Portland State Vikings"],
+    "Weber St.": ["Weber State", "Weber State Wildcats"],
+    "Texas St.": ["Texas State", "Texas State Bobcats"],
+    "Missouri St.": ["Missouri State", "Missouri State Bears"],
+    "Appalachian St.": ["App State", "Appalachian State", "App State Mountaineers"],
+    "Tarleton St.": ["Tarleton State", "Tarleton State Texans"],
+    "Sacramento St.": ["Sacramento State", "Sacramento State Hornets"],
+    "Cal St. Fullerton": ["Cal State Fullerton", "Cal State Fullerton Titans", "CS Fullerton"],
+    "Cal St. Bakersfield": ["Cal State Bakersfield", "Cal State Bakersfield Roadrunners", "CS Bakersfield"],
+    "Cal St. Northridge": ["Cal State Northridge", "Cal State Northridge Matadors", "CS Northridge"],
+
+    # --- Other commonly mismatched ---
+    "Louisiana": ["Louisiana Ragin' Cajuns", "Louisiana-Lafayette", "UL Lafayette"],
+    "UL Monroe": ["Louisiana Monroe", "UL Monroe Warhawks", "Louisiana-Monroe"],
+    "UMass": ["Massachusetts", "Massachusetts Minutemen", "UMass Minutemen"],
+    "Purdue Fort Wayne": ["Purdue Fort Wayne Mastodons", "Fort Wayne", "IPFW"],
+    "IUPUI": ["IU Indianapolis", "IU Indianapolis Jaguars", "Indiana University-Purdue University Indianapolis"],
+    "Little Rock": ["Arkansas Little Rock", "Little Rock Trojans", "UALR"],
+    "College of Charleston": ["Charleston", "Charleston Cougars"],
+    "Western Kentucky": ["Western Kentucky Hilltoppers", "WKU"],
+    "Saint Francis": ["Saint Francis Red Flash", "St. Francis (PA)", "Saint Francis (PA)"],
+    "St. Francis Brooklyn": ["St. Francis Brooklyn Terriers", "St. Francis (BK)"],
+    "Gardner-Webb": ["Gardner-Webb Runnin' Bulldogs", "Gardner Webb"],
+    "Southeastern Louisiana": ["SE Louisiana", "SE Louisiana Lions", "Southeastern Louisiana Lions"],
+    "Southeast Missouri St.": ["Southeast Missouri State", "Southeast Missouri State Redhawks", "SEMO"],
+    "Western Carolina": ["Western Carolina Catamounts"],
+    "Texas A&M Corpus Christi": ["Texas A&M-Corpus Christi", "Texas A&M-Corpus Christi Islanders", "TAMUCC"],
+    "Omaha": ["Nebraska Omaha", "Omaha Mavericks", "UNO"],
+    "Grambling": ["Grambling State", "Grambling Tigers", "Grambling St."],
+    "Delaware St.": ["Delaware State", "Delaware State Hornets"],
+    "Central Michigan": ["Central Michigan Chippewas"],
+    "Ball St.": ["Ball State", "Ball State Cardinals"],
+    "Western Illinois": ["Western Illinois Leathernecks"],
+    "San José St.": ["San Jose State", "San José State Spartans"],
+    "Alcorn St.": ["Alcorn State", "Alcorn State Braves"],
+    "South Carolina Upstate": ["USC Upstate", "South Carolina Upstate Spartans"],
+    "Chicago St.": ["Chicago State", "Chicago State Cougars"],
+    "Boston University": ["Boston University Terriers", "Boston U"],
+    "Coastal Carolina": ["Coastal Carolina Chanticleers"],
+    "Eastern Kentucky": ["Eastern Kentucky Colonels"],
+    "Northwestern St.": ["Northwestern State", "Northwestern State Demons"],
+    "Loyola Marymount": ["Loyola (CA)", "Loyola Marymount Lions"],
 }
 
 # Build reverse lookup: any variant -> canonical name
@@ -99,7 +174,16 @@ _MASCOTS = {
     "golden hurricane", "bearkats", "broncos", "red storm",
     "scarlet knights", "bluejays", "rain", "rainbow warriors",
     "jaguars", "bulls", "mountain hawks", "sharks", "vandals",
-    "revolutionaries",
+    "revolutionaries", "sun devils", "nittany lions", "chanticleers",
+    "colonels", "roadrunners", "matadors", "redbirds", "hornets",
+    "red wolves", "texans", "chippewas", "leathernecks", "terriers",
+    "runnin' bulldogs", "runnin bulldogs", "peacocks", "cougars",
+    "ragin' cajuns", "ragin cajuns", "warhawks", "minutemen",
+    "mastodons", "islanders", "mavericks", "beach", "vikings",
+    "bobcats", "jackrabbits", "catamounts", "blue raiders",
+    "great danes", "sycamores", "norse", "red flash", "buccaneers",
+    "gauchos", "bonnies", "hilltoppers", "demons", "redhawks",
+    "gammecocks", "gamecocks", "aztecs", "mountaineers", "ramblers",
 }
 
 
@@ -132,7 +216,23 @@ def normalize(name: str) -> str:
         result = _LOOKUP.get(no_mascot.lower())
         if result:
             return result
+
+        # "X State" -> "X St." fallback for KenPom matching
+        if " State" in no_mascot:
+            st_variant = no_mascot.replace(" State", " St.")
+            result = _LOOKUP.get(st_variant.lower())
+            if result:
+                return result
+            return st_variant
+
         return no_mascot
+
+    # "X State" -> "X St." even without mascot
+    if " State" in stripped:
+        st_variant = stripped.replace(" State", " St.")
+        result = _LOOKUP.get(st_variant.lower())
+        if result:
+            return result
 
     return stripped
 

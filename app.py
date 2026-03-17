@@ -345,7 +345,7 @@ except Exception:
 # ---------------------------------------------------------------------------
 
 st.markdown("# 🏀 March Madness Prediction Engine")
-st.caption("Live NCAA tournament matchup explorer · KenPom ratings · Dual-model predictions · Sportsbook odds")
+st.caption("Live NCAA tournament matchup explorer · KenPom ratings · KenPom Formula + Historical ML predictions · Sportsbook odds")
 
 # ---------------------------------------------------------------------------
 # Tabs
@@ -736,20 +736,20 @@ def _render_derived_stats(stats: MatchupStats, name_a: str, name_b: str):
 
 
 def _render_prediction(prediction: MatchupPrediction, name_a: str, name_b: str, color_a: str, color_b: str):
-    st.markdown('<div class="section-header">Model Predictions</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">KenPom Predictions</div>', unsafe_allow_html=True)
 
     f = prediction.formula
     ml = prediction.ml
 
     if ml is not None:
         if prediction.models_agree:
-            st.markdown(f'<span class="agree-badge agree">Models Agree: {prediction.consensus_winner}</span>', unsafe_allow_html=True)
+            st.markdown(f'<span class="agree-badge agree">Both KenPom Models Agree: {prediction.consensus_winner}</span>', unsafe_allow_html=True)
         else:
-            st.markdown(f'<span class="agree-badge disagree">Models Disagree — Formula: {f.predicted_winner} · ML: {ml.predicted_winner}</span>', unsafe_allow_html=True)
+            st.markdown(f'<span class="agree-badge disagree">Models Disagree — KenPom Formula: {f.predicted_winner} · Historical ML: {ml.predicted_winner}</span>', unsafe_allow_html=True)
 
-    _render_probability_bar(name_a, name_b, f.win_prob_a, color_a, color_b, "Formula Model")
+    _render_probability_bar(name_a, name_b, f.win_prob_a, color_a, color_b, "KenPom Formula (This Season)")
     if ml:
-        _render_probability_bar(name_a, name_b, ml.win_prob_a, color_a, color_b, "ML Model")
+        _render_probability_bar(name_a, name_b, ml.win_prob_a, color_a, color_b, "Historical KenPom ML (11 Seasons)")
 
     if ml:
         col_f, col_ml = st.columns(2)
@@ -758,7 +758,7 @@ def _render_prediction(prediction: MatchupPrediction, name_a: str, name_b: str, 
         col_ml = None
 
     with col_f:
-        st.markdown("**Formula Model**")
+        st.markdown("**KenPom Formula** *(this season's ratings)*")
         fc1, fc2, fc3 = st.columns(3)
         with fc1:
             st.metric("Winner", f.predicted_winner)
@@ -778,7 +778,7 @@ def _render_prediction(prediction: MatchupPrediction, name_a: str, name_b: str, 
 
     if col_ml and ml:
         with col_ml:
-            st.markdown("**ML Model**")
+            st.markdown("**Historical KenPom ML** *(trained on 960 real tournament games, 2014–2025)*")
             mc1, mc2, mc3 = st.columns(3)
             with mc1:
                 st.metric("Winner", ml.predicted_winner)
@@ -787,14 +787,19 @@ def _render_prediction(prediction: MatchupPrediction, name_a: str, name_b: str, 
             with mc3:
                 st.metric("Confidence", ml.confidence)
 
-    with st.expander("📖 What do the confidence levels mean?"):
+    with st.expander("📖 How do the models work?"):
         st.markdown(
-            "**Strong Lean** — The model gives the favored team a **65%+ win probability**. "
-            "This is a high-confidence pick — the stats strongly favor one side.\n\n"
-            "**Solid** — Win probability between **57–65%**. "
-            "The model sees a clear advantage, but there's meaningful upset potential.\n\n"
-            "**Lean** — Win probability below **57%**. "
-            "This is close to a toss-up — the model slightly favors one team but wouldn't be surprised by either outcome."
+            "**KenPom Formula** uses this season's KenPom efficiency ratings to project "
+            "scores, margin, and win probability through a possession-based formula. "
+            "It reflects where teams stand *right now*.\n\n"
+            "**Historical KenPom ML** is a machine learning model (Logistic Regression) "
+            "trained on **960 real NCAA tournament games from 2014–2025**, using pre-tournament "
+            "KenPom snapshots. It learned which KenPom stat differentials actually predict "
+            "tournament wins from a decade of March Madness results.\n\n"
+            "---\n\n"
+            "**Strong Lean** — 65%+ win probability. High-confidence pick.\n\n"
+            "**Solid** — 57–65% win probability. Clear advantage, but upset potential exists.\n\n"
+            "**Lean** — Below 57%. Close to a toss-up."
         )
 
 
@@ -1374,7 +1379,7 @@ def _build_lock_picks(games: list, ts: dict, m_odds: dict) -> list[dict]:
 
 with tab_locks:
     st.markdown("### 🔒 Lock It In")
-    st.caption("High-confidence picks across every game — the model's best bets where the line doesn't match the stats.")
+    st.caption("High-confidence picks across every game — where KenPom data says the line is off.")
 
     if not all_games:
         st.info("No tournament games found. Check back when the bracket is released.")
@@ -1394,7 +1399,7 @@ with tab_locks:
         else:
             _lock_filter = st.selectbox(
                 "Filter",
-                ["All Picks", "Strong Leans Only", "With Market Edge", "Models Agree"],
+                ["All Picks", "Strong Leans Only", "With Market Edge", "Both Models Agree"],
                 key="lock_filter",
             )
 
@@ -1402,7 +1407,7 @@ with tab_locks:
                 picks = [p for p in picks if p["formula_conf"] == "Strong Lean"]
             elif _lock_filter == "With Market Edge":
                 picks = [p for p in picks if p["picks_list"]]
-            elif _lock_filter == "Models Agree":
+            elif _lock_filter == "Both Models Agree":
                 picks = [p for p in picks if p["pred"].models_agree and p["pred"].ml is not None]
 
             st.markdown(f"**{len(picks)} games** with actionable picks")
@@ -1426,9 +1431,9 @@ with tab_locks:
                 models_badge = ""
                 if pred.ml is not None:
                     if pred.models_agree:
-                        models_badge = ' <span class="agree-badge agree" style="font-size:0.7rem;padding:2px 8px;">Both Models Agree</span>'
+                        models_badge = ' <span class="agree-badge agree" style="font-size:0.7rem;padding:2px 8px;">Formula + Historical ML Agree</span>'
                     else:
-                        models_badge = ' <span class="agree-badge disagree" style="font-size:0.7rem;padding:2px 8px;">Models Disagree</span>'
+                        models_badge = ' <span class="agree-badge disagree" style="font-size:0.7rem;padding:2px 8px;">Formula vs Historical ML Disagree</span>'
 
                 header_html = (
                     f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">'
@@ -1448,18 +1453,17 @@ with tab_locks:
                     if meta_line:
                         st.caption(meta_line)
 
-                    # Model pick
                     winner = entry["winner"]
                     margin = entry["margin"]
                     st.markdown(
-                        f"**Model Pick:** {winner} by {margin:.1f} pts "
+                        f"**KenPom Formula:** {winner} by {margin:.1f} pts "
                         f"({pred.formula.win_prob_a:.0%} – {pred.formula.win_prob_b:.0%})"
                     )
 
                     if pred.ml:
                         ml_winner = pred.ml.predicted_winner
                         ml_prob = max(pred.ml.win_prob_a, pred.ml.win_prob_b)
-                        st.markdown(f"**ML Model:** {ml_winner} ({ml_prob:.0%}) · {pred.ml.confidence}")
+                        st.markdown(f"**Historical ML:** {ml_winner} ({ml_prob:.0%}) · {pred.ml.confidence}")
 
                     # Market picks
                     if entry["picks_list"]:

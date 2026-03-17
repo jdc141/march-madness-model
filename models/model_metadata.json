@@ -22,8 +22,21 @@
     "block_pct_diff",
     "ast_rate_diff"
   ],
-  "training_samples": 9556,
-  "cv_accuracy": 0.6953,
-  "cv_log_loss": 0.5824,
-  "trained_at": "2026-03-17T14:28:26.334719"
+  "training_samples": 960,
+  "cv_accuracy": 0.6969,
+  "cv_log_loss": 0.5716,
+  "trained_at": "2026-03-17T14:52:28.843657",
+  "seasons": [
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+  ]
 }
