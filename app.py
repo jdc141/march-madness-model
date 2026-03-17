@@ -351,9 +351,10 @@ st.caption("Live NCAA tournament matchup explorer · KenPom ratings · KenPom Fo
 # Tabs
 # ---------------------------------------------------------------------------
 
-tab_live, tab_locks, tab_bracket, tab_nit, tab_stats, tab_deep_dive, tab_lab = st.tabs([
+tab_live, tab_locks, tab_upsets, tab_bracket, tab_nit, tab_stats, tab_deep_dive, tab_lab = st.tabs([
     "🏟️ March Madness",
     "🔒 Lock It In",
+    "🚨 Upset City",
     "📊 Live Bracket",
     "🏆 NIT",
     "📈 Stats Deep Dive",
@@ -1522,7 +1523,223 @@ with tab_locks:
 
 
 # ===========================================================================
-# Tab 3: Live Bracket
+# Tab 3: Upset City
+# ===========================================================================
+
+def _build_upset_picks(games: list, ts: dict) -> list[dict]:
+    """Find games where the underdog has a real shot according to the models."""
+    upsets: list[dict] = []
+
+    upcoming = espn_client.filter_games(games, status_filter="Upcoming")
+    if not upcoming:
+        upcoming = games
+
+    for g in upcoming:
+        try:
+            home = g.get("home_team", {})
+            away = g.get("away_team", {})
+            seed_a = away.get("seed")
+            seed_b = home.get("seed")
+
+            if not seed_a or not seed_b:
+                continue
+            if seed_a == seed_b:
+                continue
+
+            norm_a = normalize(away.get("name", ""))
+            norm_b = normalize(home.get("name", ""))
+            sa = ts.get(norm_a) or (ts.get(fuzzy_match(norm_a, list(ts.keys()))) if ts else None)
+            sb = ts.get(norm_b) or (ts.get(fuzzy_match(norm_b, list(ts.keys()))) if ts else None)
+            if not sa or not sb:
+                continue
+
+            sa = dict(sa); sb = dict(sb)
+            sa.setdefault("team", away.get("name", "Team A"))
+            sb.setdefault("team", home.get("name", "Team B"))
+            sa["seed"] = seed_a
+            sb["seed"] = seed_b
+
+            pred = predict_matchup(sa, sb)
+            name_a = sa["team"]
+            name_b = sb["team"]
+
+            # Who's the underdog (higher seed number)?
+            if seed_a > seed_b:
+                dog_name, fav_name = name_a, name_b
+                dog_seed, fav_seed = seed_a, seed_b
+                dog_prob = pred.formula.win_prob_a
+            else:
+                dog_name, fav_name = name_b, name_a
+                dog_seed, fav_seed = seed_b, seed_a
+                dog_prob = pred.formula.win_prob_b
+
+            dog_ml_prob = None
+            if pred.ml:
+                dog_ml_prob = pred.ml.win_prob_a if dog_name == name_a else pred.ml.win_prob_b
+
+            seed_gap = dog_seed - fav_seed
+
+            # Upset signals
+            reasons = []
+
+            if dog_prob >= 0.40:
+                reasons.append(f"Formula gives {dog_name} a {dog_prob:.0%} chance")
+            if dog_ml_prob and dog_ml_prob >= 0.40:
+                reasons.append(f"Historical ML gives {dog_name} a {dog_ml_prob:.0%} chance")
+            if pred.ml and pred.ml.predicted_winner == dog_name:
+                reasons.append("ML model picks the underdog outright")
+            if pred.formula.predicted_winner == dog_name:
+                reasons.append("Formula model picks the underdog outright")
+
+            # Stat-based upset signals
+            adj_em_dog = sa.get("adj_em", 0) if dog_name == name_a else sb.get("adj_em", 0)
+            adj_em_fav = sb.get("adj_em", 0) if dog_name == name_a else sa.get("adj_em", 0)
+            if isinstance(adj_em_dog, (int, float)) and isinstance(adj_em_fav, (int, float)):
+                em_gap = adj_em_fav - adj_em_dog
+                if em_gap < 5 and seed_gap >= 3:
+                    reasons.append(f"Only {em_gap:.1f} AdjEM gap despite {seed_gap}-seed difference")
+
+            exp_dog = sa.get("experience", 0) if dog_name == name_a else sb.get("experience", 0)
+            exp_fav = sb.get("experience", 0) if dog_name == name_a else sa.get("experience", 0)
+            if isinstance(exp_dog, (int, float)) and isinstance(exp_fav, (int, float)):
+                if exp_dog > exp_fav + 0.3:
+                    reasons.append(f"Underdog is more experienced ({exp_dog:.1f} vs {exp_fav:.1f} yrs)")
+
+            if not reasons:
+                continue
+
+            # Upset danger level
+            if pred.formula.predicted_winner == dog_name or (pred.ml and pred.ml.predicted_winner == dog_name):
+                danger = "🔥 Model Upset Pick"
+                danger_rank = 3
+            elif dog_prob >= 0.45:
+                danger = "⚠️ Toss-Up"
+                danger_rank = 2
+            elif dog_prob >= 0.30:
+                danger = "👀 Upset Watch"
+                danger_rank = 1
+            else:
+                danger = "📋 Dark Horse"
+                danger_rank = 0
+
+            upsets.append({
+                "game": g,
+                "pred": pred,
+                "name_a": name_a,
+                "name_b": name_b,
+                "dog_name": dog_name,
+                "fav_name": fav_name,
+                "dog_seed": dog_seed,
+                "fav_seed": fav_seed,
+                "dog_prob": dog_prob,
+                "dog_ml_prob": dog_ml_prob,
+                "seed_gap": seed_gap,
+                "danger": danger,
+                "danger_rank": danger_rank,
+                "reasons": reasons,
+            })
+        except Exception:
+            continue
+
+    upsets.sort(key=lambda u: (-u["danger_rank"], -u["dog_prob"]))
+    return upsets
+
+
+with tab_upsets:
+    st.markdown("### 🚨 Upset City")
+    st.caption("Games where the underdog has a real shot — model picks, close matchups, and stat-based upset signals.")
+
+    if not all_games:
+        st.info("No tournament games found. Check back when the bracket is released.")
+    elif not team_stats:
+        st.info("No team data loaded. Connect KenPom API or upload a CSV.")
+    else:
+        _upset_cache_key = "_upset_picks"
+        if _upset_cache_key not in st.session_state or st.session_state.get("_lock_stale", True):
+            with st.spinner("Scanning for upsets..."):
+                st.session_state[_upset_cache_key] = _build_upset_picks(all_games, team_stats)
+
+        upset_picks = list(st.session_state[_upset_cache_key])
+
+        _upset_filter = st.selectbox(
+            "Filter",
+            ["All Upset Alerts", "🔥 Model Upset Picks", "⚠️ Toss-Ups", "👀 Upset Watch"],
+            key="upset_filter",
+        )
+
+        if _upset_filter == "🔥 Model Upset Picks":
+            upset_picks = [u for u in upset_picks if u["danger_rank"] == 3]
+        elif _upset_filter == "⚠️ Toss-Ups":
+            upset_picks = [u for u in upset_picks if u["danger_rank"] >= 2]
+        elif _upset_filter == "👀 Upset Watch":
+            upset_picks = [u for u in upset_picks if u["danger_rank"] >= 1]
+
+        if not upset_picks:
+            st.info("No upset alerts right now. Chalk it up!")
+        else:
+            st.markdown(f"**{len(upset_picks)} games** with upset potential")
+
+            _DANGER_STYLES = {
+                3: {"color": "#ef4444", "bg": "rgba(239,68,68,0.15)", "border": "rgba(239,68,68,0.5)"},
+                2: {"color": "#f59e0b", "bg": "rgba(245,158,11,0.15)", "border": "rgba(245,158,11,0.5)"},
+                1: {"color": "#fbbf24", "bg": "rgba(251,191,36,0.15)", "border": "rgba(251,191,36,0.4)"},
+                0: {"color": "#9ca3af", "bg": "rgba(156,163,175,0.1)", "border": "rgba(156,163,175,0.3)"},
+            }
+
+            for u in upset_picks:
+                g = u["game"]
+                ds = _DANGER_STYLES.get(u["danger_rank"], _DANGER_STYLES[0])
+
+                round_info = g.get("round", "")
+                time_info = g.get("status_detail", "")
+                meta_line = " · ".join([p for p in [round_info, time_info] if p])
+
+                with st.expander(
+                    f"{u['danger']}  ({u['dog_seed']}) {u['dog_name']} over ({u['fav_seed']}) {u['fav_name']} — {u['dog_prob']:.0%}"
+                ):
+                    # Header with danger badge
+                    st.markdown(
+                        f'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;">'
+                        f'<span style="font-size:1.1rem;font-weight:700;">'
+                        f'({u["dog_seed"]}) {u["dog_name"]} vs ({u["fav_seed"]}) {u["fav_name"]}</span>'
+                        f'<span style="color:{ds["color"]};background:{ds["bg"]};font-weight:600;'
+                        f'font-size:0.85rem;border:1px solid {ds["border"]};border-radius:12px;padding:2px 10px;">'
+                        f'{u["danger"]}</span>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    if meta_line:
+                        st.caption(meta_line)
+
+                    # Probability display
+                    pred = u["pred"]
+                    name_a, name_b = u["name_a"], u["name_b"]
+                    color_a = "ef4444" if u["dog_name"] == name_a else "3b82f6"
+                    color_b = "3b82f6" if u["dog_name"] == name_a else "ef4444"
+                    _render_probability_bar(name_a, name_b, pred.formula.win_prob_a, color_a, color_b, "KenPom Formula")
+                    if pred.ml:
+                        _render_probability_bar(name_a, name_b, pred.ml.win_prob_a, color_a, color_b, "Historical ML")
+
+                    # Why this is an upset alert
+                    st.markdown("**Why this game?**")
+                    for reason in u["reasons"]:
+                        st.markdown(f"- {reason}")
+
+                    # Quick stats
+                    st.markdown("---")
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.metric("Underdog Win %", f"{u['dog_prob']:.0%}")
+                    with c2:
+                        st.metric("Seed Gap", f"{u['fav_seed']} vs {u['dog_seed']}")
+                    with c3:
+                        margin = abs(pred.formula.margin)
+                        st.metric("Projected Margin", f"{pred.formula.predicted_winner} by {margin:.1f}")
+
+
+# ===========================================================================
+# Tab 4: Live Bracket
 # ===========================================================================
 
 with tab_bracket:
