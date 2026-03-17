@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import os
+import random
 from datetime import datetime
 from pathlib import Path
 
@@ -42,6 +44,14 @@ st.set_page_config(
 st.markdown("""
 <style>
     .block-container { padding-top: 3.5rem; padding-bottom: 1rem; }
+
+    @keyframes loading-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    .loading-spinner img {
+        animation: loading-spin 4s linear infinite;
+    }
 
     [data-testid="stMetric"] {
         background: rgba(30, 30, 46, 0.6);
@@ -1089,15 +1099,264 @@ def _build_game_analysis(games: list, ts: dict, m_odds: dict) -> list[dict]:
     return analyses
 
 
+def _build_lock_picks(analysis: list[dict]) -> list[dict]:
+    """Build Lock It In picks from shared precomputed matchup analysis."""
+    picks: list[dict] = []
+
+    for item in analysis:
+        try:
+            g = item["game"]
+            pred = item["pred"]
+            name_a = item["name_a"]
+            name_b = item["name_b"]
+
+            entry = {
+                "game": g,
+                "pred": pred,
+                "name_a": name_a,
+                "name_b": name_b,
+                "confidence_prob": max(pred.formula.win_prob_a, pred.formula.win_prob_b),
+                "winner": pred.formula.predicted_winner,
+                "formula_conf": pred.formula.confidence,
+                "margin": abs(pred.formula.margin),
+                "picks_list": [],
+            }
+
+            espn_odds = item.get("espn_odds")
+            mb = item.get("multi_book")
+
+            _books_map: dict[str, dict] = {}
+            if espn_odds and (espn_odds.get("spread") is not None or espn_odds.get("ml_home")):
+                _books_map["DraftKings"] = {
+                    "spread_away": espn_odds.get("spread_away_line"),
+                    "ml_home": espn_odds.get("ml_home", ""),
+                    "ml_away": espn_odds.get("ml_away", ""),
+                    "total": espn_odds.get("over_under"),
+                }
+            if mb:
+                for bk_key in ["draftkings", "fanduel"]:
+                    if bk_key in mb:
+                        bkd = mb[bk_key]
+                        raw_sp = bkd.get("spread")
+                        bk_label = bkd.get("name", bk_key.title())
+                        _books_map[bk_label] = {
+                            "spread_away": -raw_sp if raw_sp is not None else None,
+                            "ml_home": str(bkd.get("ml_home", "")),
+                            "ml_away": str(bkd.get("ml_away", "")),
+                            "total": bkd.get("total"),
+                        }
+            _books = list(_books_map.items())
+
+            model_spread = pred.formula.fair_spread
+            model_total = pred.formula.total
+            model_prob_a = pred.formula.win_prob_a
+
+            for bk_name, bk_data in _books:
+                msa = bk_data.get("spread_away")
+                if msa is not None:
+                    try:
+                        msa = float(msa)
+                    except (TypeError, ValueError):
+                        msa = None
+                if msa is not None:
+                    sp_edge = model_spread - msa
+                    if abs(sp_edge) >= 2.5:
+                        pick_team = name_b if sp_edge > 0 else name_a
+                        mkt_fav = name_b if msa > 0 else name_a
+                        entry["picks_list"].append({
+                            "type": "Spread",
+                            "book": bk_name,
+                            "pick": f"Take {pick_team}",
+                            "edge": abs(sp_edge),
+                            "detail": f"Market: {mkt_fav} -{abs(msa):.1f} · Model fair: {abs(model_spread):.1f}",
+                        })
+
+                ml_h = bk_data.get("ml_home", "")
+                ml_a = bk_data.get("ml_away", "")
+                model_winner = pred.formula.predicted_winner
+                model_prob = model_prob_a if model_winner == name_a else (1 - model_prob_a)
+                market_ml = ml_a if model_winner == name_a else ml_h
+                if market_ml:
+                    try:
+                        mkt_ml_val = float(str(market_ml).replace("EVEN", "100").replace("+", ""))
+                        implied = 100 / (mkt_ml_val + 100) if mkt_ml_val >= 0 else abs(mkt_ml_val) / (abs(mkt_ml_val) + 100)
+                        ml_edge_pct = (model_prob - implied) * 100
+                        if ml_edge_pct > 5:
+                            entry["picks_list"].append({
+                                "type": "Moneyline",
+                                "book": bk_name,
+                                "pick": f"Take {model_winner} ML ({market_ml})",
+                                "edge": ml_edge_pct,
+                                "detail": f"Model: {model_prob:.0%} · Implied: {implied:.0%} · {ml_edge_pct:.1f}% edge",
+                            })
+                    except (ValueError, ZeroDivisionError):
+                        pass
+
+                mkt_total = bk_data.get("total")
+                if mkt_total is not None:
+                    try:
+                        mkt_total = float(mkt_total)
+                    except (TypeError, ValueError):
+                        mkt_total = None
+                if mkt_total is not None:
+                    total_edge = model_total - mkt_total
+                    if abs(total_edge) >= 4.0:
+                        direction = "OVER" if total_edge > 0 else "UNDER"
+                        entry["picks_list"].append({
+                            "type": "Total",
+                            "book": bk_name,
+                            "pick": f"Take the {direction} {mkt_total}",
+                            "edge": abs(total_edge),
+                            "detail": f"Model projects {model_total:.0f} total · {abs(total_edge):.1f} pts of value",
+                        })
+
+            # Dedup picks: keep best edge per type+direction
+            seen_picks: dict[str, dict] = {}
+            for pk in entry["picks_list"]:
+                dedup_key = f"{pk['type']}:{pk['pick']}"
+                if dedup_key not in seen_picks or pk["edge"] > seen_picks[dedup_key]["edge"]:
+                    seen_picks[dedup_key] = pk
+            entry["picks_list"] = list(seen_picks.values())
+
+            if entry["picks_list"] or entry["formula_conf"] in ("Strong Lean", "Solid"):
+                picks.append(entry)
+
+        except Exception:
+            continue
+
+    picks.sort(key=lambda p: (-p["confidence_prob"], -len(p["picks_list"])))
+    return picks
+
+
+def _build_upset_picks(analysis: list[dict]) -> list[dict]:
+    """Find games where the underdog has a real shot from shared analysis."""
+    upsets: list[dict] = []
+
+    for item in analysis:
+        try:
+            g = item["game"]
+            home = item["home"]
+            away = item["away"]
+            seed_a = away.get("seed")
+            seed_b = home.get("seed")
+
+            if not seed_a or not seed_b:
+                continue
+            if seed_a == seed_b:
+                continue
+
+            sa = item["stats_a"]
+            sb = item["stats_b"]
+            pred = item["pred"]
+            name_a = item["name_a"]
+            name_b = item["name_b"]
+
+            if seed_a > seed_b:
+                dog_name, fav_name = name_a, name_b
+                dog_seed, fav_seed = seed_a, seed_b
+                dog_prob = pred.formula.win_prob_a
+            else:
+                dog_name, fav_name = name_b, name_a
+                dog_seed, fav_seed = seed_b, seed_a
+                dog_prob = pred.formula.win_prob_b
+
+            dog_ml_prob = None
+            if pred.ml:
+                dog_ml_prob = pred.ml.win_prob_a if dog_name == name_a else pred.ml.win_prob_b
+
+            seed_gap = dog_seed - fav_seed
+            reasons = []
+
+            if dog_prob >= 0.40:
+                reasons.append(f"Formula gives {dog_name} a {dog_prob:.0%} chance")
+            if dog_ml_prob and dog_ml_prob >= 0.40:
+                reasons.append(f"Historical ML gives {dog_name} a {dog_ml_prob:.0%} chance")
+            if pred.ml and pred.ml.predicted_winner == dog_name:
+                reasons.append("ML model picks the underdog outright")
+            if pred.formula.predicted_winner == dog_name:
+                reasons.append("Formula model picks the underdog outright")
+
+            adj_em_dog = sa.get("adj_em", 0) if dog_name == name_a else sb.get("adj_em", 0)
+            adj_em_fav = sb.get("adj_em", 0) if dog_name == name_a else sa.get("adj_em", 0)
+            if isinstance(adj_em_dog, (int, float)) and isinstance(adj_em_fav, (int, float)):
+                em_gap = adj_em_fav - adj_em_dog
+                if em_gap < 5 and seed_gap >= 3:
+                    reasons.append(f"Only {em_gap:.1f} AdjEM gap despite {seed_gap}-seed difference")
+
+            exp_dog = sa.get("experience", 0) if dog_name == name_a else sb.get("experience", 0)
+            exp_fav = sb.get("experience", 0) if dog_name == name_a else sa.get("experience", 0)
+            if isinstance(exp_dog, (int, float)) and isinstance(exp_fav, (int, float)):
+                if exp_dog > exp_fav + 0.3:
+                    reasons.append(f"Underdog is more experienced ({exp_dog:.1f} vs {exp_fav:.1f} yrs)")
+
+            if not reasons:
+                continue
+
+            if pred.formula.predicted_winner == dog_name or (pred.ml and pred.ml.predicted_winner == dog_name):
+                danger = "🔥 Model Upset Pick"
+                danger_rank = 3
+            elif dog_prob >= 0.45:
+                danger = "⚠️ Toss-Up"
+                danger_rank = 2
+            elif dog_prob >= 0.30:
+                danger = "👀 Upset Watch"
+                danger_rank = 1
+            else:
+                danger = "📋 Dark Horse"
+                danger_rank = 0
+
+            upsets.append({
+                "game": g,
+                "pred": pred,
+                "name_a": name_a,
+                "name_b": name_b,
+                "dog_name": dog_name,
+                "fav_name": fav_name,
+                "dog_seed": dog_seed,
+                "fav_seed": fav_seed,
+                "dog_prob": dog_prob,
+                "dog_ml_prob": dog_ml_prob,
+                "seed_gap": seed_gap,
+                "danger": danger,
+                "danger_rank": danger_rank,
+                "reasons": reasons,
+            })
+        except Exception:
+            continue
+
+    upsets.sort(key=lambda u: (-u["danger_rank"], -u["dog_prob"]))
+    return upsets
+
+
 def _ensure_precomputed_insights(games: list, ts: dict, m_odds: dict) -> None:
     """Build heavy matchup analysis once per refresh cycle."""
     if "_analysis_cache" not in st.session_state or st.session_state.get("_analysis_stale", True):
-        with st.spinner("Crunching matchup insights..."):
-            analysis = _build_game_analysis(games, ts, m_odds)
-            st.session_state["_analysis_cache"] = analysis
-            st.session_state["_lock_picks"] = _build_lock_picks(analysis)
-            st.session_state["_upset_picks"] = _build_upset_picks(analysis)
-            st.session_state["_analysis_stale"] = False
+        loading_placeholder = st.empty()
+        with loading_placeholder.container():
+            loading_dir = Path(__file__).parent / "assets" / "loading"
+            loading_imgs = [
+                p for p in loading_dir.glob("*")
+                if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif")
+            ] if loading_dir.exists() else []
+            if loading_imgs:
+                chosen = random.choice(loading_imgs)
+                data = chosen.read_bytes()
+                b64 = base64.b64encode(data).decode()
+                ext = chosen.suffix.lower()
+                mime = "image/png" if ext == ".png" else "image/jpeg" if ext in (".jpg", ".jpeg") else "image/gif"
+                html = (
+                    f'<div class="loading-spinner" style="text-align:center;margin:1rem 0;">'
+                    f'<img src="data:{mime};base64,{b64}" width="180" alt="Loading">'
+                    f'</div>'
+                )
+                st.markdown(html, unsafe_allow_html=True)
+            st.caption("Crunching matchup insights...")
+        analysis = _build_game_analysis(games, ts, m_odds)
+        st.session_state["_analysis_cache"] = analysis
+        st.session_state["_lock_picks"] = _build_lock_picks(analysis)
+        st.session_state["_upset_picks"] = _build_upset_picks(analysis)
+        st.session_state["_analysis_stale"] = False
+        loading_placeholder.empty()
 
 
 def _render_news(news: list[dict]) -> None:
@@ -1319,135 +1578,6 @@ with tab_live:
 # Tab 2: Lock It In
 # ===========================================================================
 
-def _build_lock_picks(analysis: list[dict]) -> list[dict]:
-    """Build Lock It In picks from shared precomputed matchup analysis."""
-    picks: list[dict] = []
-
-    for item in analysis:
-        try:
-            g = item["game"]
-            pred = item["pred"]
-            name_a = item["name_a"]
-            name_b = item["name_b"]
-
-            entry = {
-                "game": g,
-                "pred": pred,
-                "name_a": name_a,
-                "name_b": name_b,
-                "confidence_prob": max(pred.formula.win_prob_a, pred.formula.win_prob_b),
-                "winner": pred.formula.predicted_winner,
-                "formula_conf": pred.formula.confidence,
-                "margin": abs(pred.formula.margin),
-                "picks_list": [],
-            }
-
-            espn_odds = item.get("espn_odds")
-            mb = item.get("multi_book")
-
-            _books_map: dict[str, dict] = {}
-            if espn_odds and (espn_odds.get("spread") is not None or espn_odds.get("ml_home")):
-                _books_map["DraftKings"] = {
-                    "spread_away": espn_odds.get("spread_away_line"),
-                    "ml_home": espn_odds.get("ml_home", ""),
-                    "ml_away": espn_odds.get("ml_away", ""),
-                    "total": espn_odds.get("over_under"),
-                }
-            if mb:
-                for bk_key in ["draftkings", "fanduel"]:
-                    if bk_key in mb:
-                        bkd = mb[bk_key]
-                        raw_sp = bkd.get("spread")
-                        bk_label = bkd.get("name", bk_key.title())
-                        _books_map[bk_label] = {
-                            "spread_away": -raw_sp if raw_sp is not None else None,
-                            "ml_home": str(bkd.get("ml_home", "")),
-                            "ml_away": str(bkd.get("ml_away", "")),
-                            "total": bkd.get("total"),
-                        }
-            _books = list(_books_map.items())
-
-            model_spread = pred.formula.fair_spread
-            model_total = pred.formula.total
-            model_prob_a = pred.formula.win_prob_a
-
-            for bk_name, bk_data in _books:
-                msa = bk_data.get("spread_away")
-                if msa is not None:
-                    try:
-                        msa = float(msa)
-                    except (TypeError, ValueError):
-                        msa = None
-                if msa is not None:
-                    sp_edge = model_spread - msa
-                    if abs(sp_edge) >= 2.5:
-                        pick_team = name_b if sp_edge > 0 else name_a
-                        mkt_fav = name_b if msa > 0 else name_a
-                        entry["picks_list"].append({
-                            "type": "Spread",
-                            "book": bk_name,
-                            "pick": f"Take {pick_team}",
-                            "edge": abs(sp_edge),
-                            "detail": f"Market: {mkt_fav} -{abs(msa):.1f} · Model fair: {abs(model_spread):.1f}",
-                        })
-
-                ml_h = bk_data.get("ml_home", "")
-                ml_a = bk_data.get("ml_away", "")
-                model_winner = pred.formula.predicted_winner
-                model_prob = model_prob_a if model_winner == name_a else (1 - model_prob_a)
-                market_ml = ml_a if model_winner == name_a else ml_h
-                if market_ml:
-                    try:
-                        mkt_ml_val = float(str(market_ml).replace("EVEN", "100").replace("+", ""))
-                        implied = 100 / (mkt_ml_val + 100) if mkt_ml_val >= 0 else abs(mkt_ml_val) / (abs(mkt_ml_val) + 100)
-                        ml_edge_pct = (model_prob - implied) * 100
-                        if ml_edge_pct > 5:
-                            entry["picks_list"].append({
-                                "type": "Moneyline",
-                                "book": bk_name,
-                                "pick": f"Take {model_winner} ML ({market_ml})",
-                                "edge": ml_edge_pct,
-                                "detail": f"Model: {model_prob:.0%} · Implied: {implied:.0%} · {ml_edge_pct:.1f}% edge",
-                            })
-                    except (ValueError, ZeroDivisionError):
-                        pass
-
-                mkt_total = bk_data.get("total")
-                if mkt_total is not None:
-                    try:
-                        mkt_total = float(mkt_total)
-                    except (TypeError, ValueError):
-                        mkt_total = None
-                if mkt_total is not None:
-                    total_edge = model_total - mkt_total
-                    if abs(total_edge) >= 4.0:
-                        direction = "OVER" if total_edge > 0 else "UNDER"
-                        entry["picks_list"].append({
-                            "type": "Total",
-                            "book": bk_name,
-                            "pick": f"Take the {direction} {mkt_total}",
-                            "edge": abs(total_edge),
-                            "detail": f"Model projects {model_total:.0f} total · {abs(total_edge):.1f} pts of value",
-                        })
-
-            # Dedup picks: keep best edge per type+direction
-            seen_picks: dict[str, dict] = {}
-            for pk in entry["picks_list"]:
-                dedup_key = f"{pk['type']}:{pk['pick']}"
-                if dedup_key not in seen_picks or pk["edge"] > seen_picks[dedup_key]["edge"]:
-                    seen_picks[dedup_key] = pk
-            entry["picks_list"] = list(seen_picks.values())
-
-            if entry["picks_list"] or entry["formula_conf"] in ("Strong Lean", "Solid"):
-                picks.append(entry)
-
-        except Exception:
-            continue
-
-    picks.sort(key=lambda p: (-p["confidence_prob"], -len(p["picks_list"])))
-    return picks
-
-
 with tab_locks:
     st.markdown("### 🔒 Lock It In")
     st.caption("High-confidence picks across every game — where KenPom data says the line is off.")
@@ -1561,114 +1691,9 @@ with tab_locks:
 # Tab 3: Upset City
 # ===========================================================================
 
-def _build_upset_picks(analysis: list[dict]) -> list[dict]:
-    """Find games where the underdog has a real shot from shared analysis."""
-    upsets: list[dict] = []
-
-    for item in analysis:
-        try:
-            g = item["game"]
-            home = item["home"]
-            away = item["away"]
-            seed_a = away.get("seed")
-            seed_b = home.get("seed")
-
-            if not seed_a or not seed_b:
-                continue
-            if seed_a == seed_b:
-                continue
-
-            sa = item["stats_a"]
-            sb = item["stats_b"]
-            pred = item["pred"]
-            name_a = item["name_a"]
-            name_b = item["name_b"]
-
-            # Who's the underdog (higher seed number)?
-            if seed_a > seed_b:
-                dog_name, fav_name = name_a, name_b
-                dog_seed, fav_seed = seed_a, seed_b
-                dog_prob = pred.formula.win_prob_a
-            else:
-                dog_name, fav_name = name_b, name_a
-                dog_seed, fav_seed = seed_b, seed_a
-                dog_prob = pred.formula.win_prob_b
-
-            dog_ml_prob = None
-            if pred.ml:
-                dog_ml_prob = pred.ml.win_prob_a if dog_name == name_a else pred.ml.win_prob_b
-
-            seed_gap = dog_seed - fav_seed
-
-            # Upset signals
-            reasons = []
-
-            if dog_prob >= 0.40:
-                reasons.append(f"Formula gives {dog_name} a {dog_prob:.0%} chance")
-            if dog_ml_prob and dog_ml_prob >= 0.40:
-                reasons.append(f"Historical ML gives {dog_name} a {dog_ml_prob:.0%} chance")
-            if pred.ml and pred.ml.predicted_winner == dog_name:
-                reasons.append("ML model picks the underdog outright")
-            if pred.formula.predicted_winner == dog_name:
-                reasons.append("Formula model picks the underdog outright")
-
-            # Stat-based upset signals
-            adj_em_dog = sa.get("adj_em", 0) if dog_name == name_a else sb.get("adj_em", 0)
-            adj_em_fav = sb.get("adj_em", 0) if dog_name == name_a else sa.get("adj_em", 0)
-            if isinstance(adj_em_dog, (int, float)) and isinstance(adj_em_fav, (int, float)):
-                em_gap = adj_em_fav - adj_em_dog
-                if em_gap < 5 and seed_gap >= 3:
-                    reasons.append(f"Only {em_gap:.1f} AdjEM gap despite {seed_gap}-seed difference")
-
-            exp_dog = sa.get("experience", 0) if dog_name == name_a else sb.get("experience", 0)
-            exp_fav = sb.get("experience", 0) if dog_name == name_a else sa.get("experience", 0)
-            if isinstance(exp_dog, (int, float)) and isinstance(exp_fav, (int, float)):
-                if exp_dog > exp_fav + 0.3:
-                    reasons.append(f"Underdog is more experienced ({exp_dog:.1f} vs {exp_fav:.1f} yrs)")
-
-            if not reasons:
-                continue
-
-            # Upset danger level
-            if pred.formula.predicted_winner == dog_name or (pred.ml and pred.ml.predicted_winner == dog_name):
-                danger = "🔥 Model Upset Pick"
-                danger_rank = 3
-            elif dog_prob >= 0.45:
-                danger = "⚠️ Toss-Up"
-                danger_rank = 2
-            elif dog_prob >= 0.30:
-                danger = "👀 Upset Watch"
-                danger_rank = 1
-            else:
-                danger = "📋 Dark Horse"
-                danger_rank = 0
-
-            upsets.append({
-                "game": g,
-                "pred": pred,
-                "name_a": name_a,
-                "name_b": name_b,
-                "dog_name": dog_name,
-                "fav_name": fav_name,
-                "dog_seed": dog_seed,
-                "fav_seed": fav_seed,
-                "dog_prob": dog_prob,
-                "dog_ml_prob": dog_ml_prob,
-                "seed_gap": seed_gap,
-                "danger": danger,
-                "danger_rank": danger_rank,
-                "reasons": reasons,
-            })
-        except Exception:
-            continue
-
-    upsets.sort(key=lambda u: (-u["danger_rank"], -u["dog_prob"]))
-    return upsets
-
-
 with tab_upsets:
     st.markdown("### 🚨 Upset City")
-    st.caption("Games where the underdog has a real shot — model picks, close matchups, and stat-based upset signals.")
+    st.caption("Upset potential across every game — where the underdog has a real shot according to the models.")
 
     if not all_games:
         st.info("No tournament games found. Check back when the bracket is released.")
