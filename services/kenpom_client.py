@@ -1,4 +1,4 @@
-"""KenPom API client with Streamlit caching, rate-limit handling, and fallback."""
+"""KenPom API client with Streamlit caching and rate-limit handling."""
 
 from __future__ import annotations
 
@@ -42,9 +42,9 @@ def _handle_error(source: str, exc: Exception) -> None:
     is_rate_limit = "429" in msg or "rate" in msg.lower() or "too many" in msg.lower()
 
     if is_rate_limit:
-        _last_error = "Rate limited — using cached/fallback data"
+        _last_error = "Rate limited — using cached data"
         _log.warning("KenPom %s: rate limited (%s)", source, msg)
-        st.warning(f"KenPom rate limit hit for {source}. Using cached or fallback data.")
+        st.warning(f"KenPom rate limit hit for {source}. Using cached data.")
     else:
         _last_error = f"{source}: {msg[:80]}"
         _log.warning("KenPom %s failed: %s", source, msg)
@@ -122,8 +122,10 @@ _FIELD_MAP = {
     "RankAdjOE": "rank_adj_o",
     "AdjDE": "adj_d",
     "RankAdjDE": "rank_adj_d",
-    "Tempo": "tempo",
-    "AdjTempo": "adj_tempo",
+    # Use adjusted tempo as the canonical pace input so live data matches
+    # historical training snapshots.
+    "Tempo": "raw_tempo",
+    "AdjTempo": "tempo",
     "RankAdjTempo": "rank_adj_tempo",
     "Luck": "luck",
     "RankLuck": "rank_luck",

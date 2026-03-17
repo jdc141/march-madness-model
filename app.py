@@ -312,13 +312,7 @@ except Exception as _e:
     st.sidebar.error(f"Team stats error: {_e}")
 
 if not team_stats:
-    try:
-        team_stats = csv_loader.load_team_stats_csv()
-        if team_stats:
-            stats_source = "Fallback CSV"
-    except Exception:
-        team_stats = {}
-        stats_source = "None (all sources failed)"
+    stats_source = "None"
 
 all_games: list = []
 sched_source = "None"
@@ -330,12 +324,7 @@ except Exception as _e:
     st.sidebar.error(f"ESPN error: {_e}")
 
 if not all_games:
-    try:
-        all_games = csv_loader.load_schedule_csv()
-        if all_games:
-            sched_source = "Fallback CSV"
-    except Exception:
-        all_games = []
+    all_games = []
 
 multi_odds: dict = {}
 try:
@@ -1333,7 +1322,10 @@ def _ensure_precomputed_insights(games: list, ts: dict, m_odds: dict) -> None:
     if "_analysis_cache" not in st.session_state or st.session_state.get("_analysis_stale", True):
         loading_placeholder = st.empty()
         with loading_placeholder.container():
-            loading_dir = Path(__file__).parent / "assets" / "loading"
+            root_dir = Path(__file__).parent
+            loading_dir = root_dir / "loading"
+            if not loading_dir.exists():
+                loading_dir = root_dir / "assets" / "loading"
             loading_imgs = [
                 p for p in loading_dir.glob("*")
                 if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif")

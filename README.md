@@ -17,7 +17,7 @@ Live NCAA tournament matchup explorer with KenPom-style ratings, dual prediction
 |--------|------|------|
 | [KenPom API](https://kenpom.com) | Team ratings, four factors, misc stats | Bearer token ($25/yr subscription) |
 | ESPN Scoreboard API | Tournament schedule, scores, DraftKings odds, team logos | None (free) |
-| Fallback CSVs | Demo data when APIs are unavailable | N/A |
+| Uploaded CSV (optional) | Manual team stat override | None |
 
 ## Quick Start
 
@@ -41,7 +41,7 @@ cp .env.example .env
 streamlit run app.py
 ```
 
-The app works without a KenPom token (falls back to bundled CSV data), but live data requires a [KenPom subscription](https://kenpom.com/register-kenpom.php). Your bearer token is at [kenpom.com/account.php](https://kenpom.com/account.php).
+The app can run without a KenPom token, but predictions require either live KenPom data or a manual CSV upload. Live KenPom access requires a [KenPom subscription](https://kenpom.com/register-kenpom.php). Your bearer token is at [kenpom.com/account.php](https://kenpom.com/account.php).
 
 ## ML Model Training (optional)
 
