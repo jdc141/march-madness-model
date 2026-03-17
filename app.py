@@ -41,7 +41,7 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    .block-container { padding-top: 2rem; padding-bottom: 1rem; }
+    .block-container { padding-top: 3.5rem; padding-bottom: 1rem; }
 
     [data-testid="stMetric"] {
         background: rgba(30, 30, 46, 0.6);
@@ -1113,6 +1113,22 @@ with tab_live:
     if not all_games:
         st.info("No tournament games found. Check back when the bracket is released.")
     else:
+        # Build searchable team list from all games
+        _all_team_names = sorted({
+            t.get("short_name") or t.get("name", "")
+            for g in all_games
+            for t in [g.get("home_team", {}), g.get("away_team", {})]
+            if t.get("name")
+        })
+
+        team_search = st.selectbox(
+            "🔍 Search Team",
+            [""] + _all_team_names,
+            index=0,
+            key="live_team_search",
+            placeholder="Type a team name...",
+        )
+
         rounds = _sort_rounds([r for r in {g.get("round", "") for g in all_games} if r])
         regions = sorted({g.get("region", "") for g in all_games if g.get("region")})
 
@@ -1127,6 +1143,17 @@ with tab_live:
         filtered = espn_client.filter_games(
             all_games, round_filter=round_sel, status_filter=status_sel, region_filter=region_sel,
         )
+
+        # Apply team search filter
+        if team_search:
+            search_lower = team_search.lower()
+            filtered = [
+                g for g in filtered
+                if search_lower in (g.get("home_team", {}).get("name", "") or "").lower()
+                or search_lower in (g.get("away_team", {}).get("name", "") or "").lower()
+                or search_lower in (g.get("home_team", {}).get("short_name", "") or "").lower()
+                or search_lower in (g.get("away_team", {}).get("short_name", "") or "").lower()
+            ]
 
         if not filtered:
             st.warning("No games match the current filters.")
