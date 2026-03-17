@@ -829,6 +829,8 @@ def _render_market_comparison(prediction: MatchupPrediction, espn_odds: dict | N
             "name": "DraftKings",
             "spread": espn_odds.get("spread"),
             "spread_detail": espn_odds.get("spread_detail", ""),
+            "spread_away": espn_odds.get("spread_away_line"),
+            "spread_home": espn_odds.get("spread_home_line"),
             "ml_home": espn_odds.get("ml_home", ""),
             "ml_away": espn_odds.get("ml_away", ""),
             "total": espn_odds.get("over_under"),
@@ -839,10 +841,15 @@ def _render_market_comparison(prediction: MatchupPrediction, espn_odds: dict | N
         for bk_key in ["draftkings", "fanduel"]:
             if bk_key in multi_book:
                 bk = multi_book[bk_key]
+                # Odds API spread is from home team perspective
+                raw_spread = bk.get("spread")
+                away_spread = -raw_spread if raw_spread is not None else None
                 entry = {
                     "name": bk.get("name", bk_key.title()),
-                    "spread": bk.get("spread"),
-                    "spread_detail": f"{bk.get('spread', '')}" if bk.get("spread") is not None else "",
+                    "spread": raw_spread,
+                    "spread_detail": f"{bk.get('spread', '')}" if raw_spread is not None else "",
+                    "spread_away": away_spread,
+                    "spread_home": raw_spread,
                     "ml_home": str(bk.get("ml_home", "")),
                     "ml_away": str(bk.get("ml_away", "")),
                     "total": bk.get("total"),
@@ -863,54 +870,44 @@ def _render_market_comparison(prediction: MatchupPrediction, espn_odds: dict | N
             st.markdown(f"**{bk['name']}**")
 
             # --- Spread pick ---
-            # model_spread = fair_spread = -margin, from team_a perspective
-            #   negative = team_a is favored, positive = team_a is underdog
-            # mkt_spread from ESPN = the favorite's spread (negative number)
-            #   spread_detail shows who, e.g. "Nebraska -12.5"
-            # We need to figure out which team the market spread applies to
-            # and compare in the same direction.
+            # model_spread = fair_spread = -margin, from team_a (away) perspective
+            #   negative = team_a favored, positive = team_a is underdog
+            # spread_away = market spread from team_a (away) perspective
+            #   same convention: negative = away favored, positive = away underdog
 
-            mkt_spread = bk.get("spread")
-            if mkt_spread is not None:
+            mkt_spread_a = bk.get("spread_away")
+            if mkt_spread_a is not None:
                 try:
-                    mkt_spread = float(mkt_spread)
+                    mkt_spread_a = float(mkt_spread_a)
                 except (TypeError, ValueError):
-                    mkt_spread = None
+                    mkt_spread_a = None
 
-            if mkt_spread is not None:
-                spread_detail = bk.get("spread_detail", "")
+            spread_detail = bk.get("spread_detail", "")
 
-                # Determine which team the market spread is on by checking spread_detail
-                # ESPN spread_detail looks like "Nebraska -12.5" or "Troy +12.5"
-                # The raw spread value is always the favorite's number (negative)
-                # Convert mkt_spread to team_a perspective to match model_spread
-                mkt_spread_a = mkt_spread  # default: assume spread is from team_a perspective
-                detail_lower = spread_detail.lower()
-                if name_b.lower() in detail_lower and mkt_spread < 0:
-                    # Market says team_b is favored → from team_a perspective, flip sign
-                    mkt_spread_a = -mkt_spread
-                elif name_a.lower() in detail_lower and mkt_spread < 0:
-                    # Market says team_a is favored → already correct perspective
-                    mkt_spread_a = mkt_spread
-
-                # Both are now from team_a perspective:
-                #   negative = team_a favored, positive = team_a underdog
+            if mkt_spread_a is not None:
                 edge = model_spread - mkt_spread_a
                 # positive edge = model thinks team_a is MORE of an underdog than market
                 #   → market underrates the favorite → take team_b (the favorite)
                 # negative edge = model thinks team_a is LESS of an underdog than market
                 #   → market overrates the favorite → take team_a (the underdog)
 
+                # Build display strings
+                mkt_fav = name_b if mkt_spread_a > 0 else name_a
+                mkt_line = abs(mkt_spread_a)
+                mkt_display = f"{mkt_fav} -{mkt_line:.1f}"
+                model_fav = name_b if model_spread > 0 else name_a
+                model_line = abs(model_spread)
+                model_display = f"{model_fav} -{model_line:.1f}"
+
                 if abs(edge) >= 1.5:
                     if edge > 0:
                         pick_team = name_b
-                        reasoning = f"Market has {spread_detail}, but model says the fair line is {name_a} {model_spread:+.1f} — {abs(edge):.1f} pts of value on {name_b}"
                     else:
                         pick_team = name_a
-                        reasoning = f"Market has {spread_detail}, but model says the fair line is {name_a} {model_spread:+.1f} — {abs(edge):.1f} pts of value on {name_a}"
+                    reasoning = f"Market: {mkt_display} · Model: {model_display} — {abs(edge):.1f} pts of value on {pick_team}"
                     st.markdown(_pick_html(f"Take {pick_team}", reasoning, True), unsafe_allow_html=True)
                 else:
-                    st.markdown(_pick_html(f"Spread: {spread_detail}", f"Model line: {name_a} {model_spread:+.1f} — no significant edge ({edge:+.1f})", False), unsafe_allow_html=True)
+                    st.markdown(_pick_html(f"Spread: {mkt_display}", f"Model: {model_display} — no significant edge ({abs(edge):.1f} pts)", False), unsafe_allow_html=True)
             else:
                 st.markdown(_pick_html("Spread: N/A", "No spread available", False), unsafe_allow_html=True)
 
