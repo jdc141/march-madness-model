@@ -1458,13 +1458,15 @@ with tab_locks:
                     margin = entry["margin"]
                     st.markdown(
                         f"**KenPom Formula:** {winner} by {margin:.1f} pts "
-                        f"({pred.formula.win_prob_a:.0%} – {pred.formula.win_prob_b:.0%})"
+                        f"({name_a} {pred.formula.win_prob_a:.0%} · {name_b} {pred.formula.win_prob_b:.0%})"
                     )
 
                     if pred.ml:
-                        ml_winner = pred.ml.predicted_winner
-                        ml_prob = max(pred.ml.win_prob_a, pred.ml.win_prob_b)
-                        st.markdown(f"**Historical ML:** {ml_winner} ({ml_prob:.0%}) · {pred.ml.confidence}")
+                        st.markdown(
+                            f"**Historical ML:** {pred.ml.predicted_winner} "
+                            f"({name_a} {pred.ml.win_prob_a:.0%} · {name_b} {pred.ml.win_prob_b:.0%}) "
+                            f"· {pred.ml.confidence}"
+                        )
 
                     # Market picks
                     if entry["picks_list"]:
