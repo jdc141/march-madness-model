@@ -711,28 +711,47 @@ def _render_derived_stats(stats: MatchupStats, name_a: str, name_b: str):
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        leader = name_a if stats.adj_em_diff > 0 else name_b
-        st.metric("AdjEM Edge", f"{leader} +{abs(stats.adj_em_diff):.1f}")
-    with c2:
-        st.metric("Tempo Projection", f"{stats.tempo_projection:.1f} poss")
-    with c3:
-        st.metric("Projected Score", f"{stats.proj_score_a:.0f} – {stats.proj_score_b:.0f}")
-    with c4:
         winner = name_a if stats.proj_margin > 0 else name_b
-        st.metric("Projected Margin", f"{winner} by {abs(stats.proj_margin):.1f}")
+        st.metric("Projected Winner", f"{winner} by {abs(stats.proj_margin):.1f}")
+    with c2:
+        st.metric("Projected Score", f"{stats.proj_score_a:.0f} – {stats.proj_score_b:.0f}")
+    with c3:
+        st.metric("Projected Total", f"{stats.proj_total:.1f}")
+    with c4:
+        st.metric("Pace", f"{stats.tempo_projection:.1f} poss")
 
     c5, c6, c7, c8 = st.columns(4)
     with c5:
-        st.metric(f"{name_a} Off Edge", f"{stats.adj_o_edge_a:+.1f}")
+        leader = name_a if stats.adj_em_diff > 0 else name_b
+        st.metric("AdjEM Edge", f"{leader} +{abs(stats.adj_em_diff):.1f}",
+                  help="Raw efficiency gap per 100 possessions (overall team quality)")
     with c6:
-        st.metric(f"{name_b} Off Edge", f"{stats.adj_o_edge_b:+.1f}")
+        eff_gap = stats.adj_o_edge_a - stats.adj_o_edge_b
+        eff_leader = name_a if eff_gap > 0 else name_b
+        st.metric("Matchup Eff. Edge", f"{eff_leader} +{abs(eff_gap):.1f}",
+                  help="Net efficiency advantage in this specific matchup (offense vs opponent defense)")
     with c7:
-        st.metric("Projected Total", f"{stats.proj_total:.1f}")
-    with c8:
         if stats.upset_flag:
             st.metric("Upset Alert", f"🚨 {stats.upset_team}")
         else:
             st.metric("Seed Advantage", f"{stats.seed_diff:+.0f}")
+    with c8:
+        st.metric(f"{name_a} Exp. Eff.", f"{stats.adj_o_edge_a + 100:.1f}",
+                  help=f"{name_a}'s projected offensive efficiency vs {name_b}'s defense (D1 avg = 100)")
+
+    with st.expander("📖 What do these numbers mean?"):
+        st.markdown(
+            f"**Projected Winner / Score / Margin** — The formula projects each team's score "
+            f"by combining their offensive efficiency against the opponent's defense, adjusted "
+            f"for pace (~{stats.tempo_projection:.0f} possessions). A seed bonus of 0.12 pts "
+            f"per seed difference is added.\n\n"
+            f"**AdjEM Edge** — The raw difference in Adjusted Efficiency Margin (KenPom's #1 stat). "
+            f"This is per 100 possessions, so a +23 edge doesn't mean a 23-point game — it gets "
+            f"scaled down by the actual pace (~67 possessions = ~67% of 100).\n\n"
+            f"**Matchup Eff. Edge** — The net efficiency advantage *in this specific matchup*. "
+            f"A team's AdjEM might be +23 better overall, but if both teams have strong offenses "
+            f"that exploit the other's defensive weaknesses, the head-to-head gap can be much smaller."
+        )
 
 
 def _render_prediction(prediction: MatchupPrediction, name_a: str, name_b: str, color_a: str, color_b: str):
@@ -1285,25 +1304,27 @@ def _build_lock_picks(games: list, ts: dict, m_odds: dict) -> list[dict]:
                             mb = v
                             break
 
-            _books: list[tuple[str, dict]] = []
+            _books_map: dict[str, dict] = {}
             if espn_odds and (espn_odds.get("spread") is not None or espn_odds.get("ml_home")):
-                _books.append(("DraftKings", {
+                _books_map["DraftKings"] = {
                     "spread_away": espn_odds.get("spread_away_line"),
                     "ml_home": espn_odds.get("ml_home", ""),
                     "ml_away": espn_odds.get("ml_away", ""),
                     "total": espn_odds.get("over_under"),
-                }))
+                }
             if mb:
                 for bk_key in ["draftkings", "fanduel"]:
                     if bk_key in mb:
                         bkd = mb[bk_key]
                         raw_sp = bkd.get("spread")
-                        _books.append((bkd.get("name", bk_key.title()), {
+                        bk_label = bkd.get("name", bk_key.title())
+                        _books_map[bk_label] = {
                             "spread_away": -raw_sp if raw_sp is not None else None,
                             "ml_home": str(bkd.get("ml_home", "")),
                             "ml_away": str(bkd.get("ml_away", "")),
                             "total": bkd.get("total"),
-                        }))
+                        }
+            _books = list(_books_map.items())
 
             model_spread = pred.formula.fair_spread
             model_total = pred.formula.total
@@ -1368,6 +1389,14 @@ def _build_lock_picks(games: list, ts: dict, m_odds: dict) -> list[dict]:
                             "detail": f"Model projects {model_total:.0f} total · {abs(total_edge):.1f} pts of value",
                         })
 
+            # Dedup picks: keep best edge per type+direction
+            seen_picks: dict[str, dict] = {}
+            for pk in entry["picks_list"]:
+                dedup_key = f"{pk['type']}:{pk['pick']}"
+                if dedup_key not in seen_picks or pk["edge"] > seen_picks[dedup_key]["edge"]:
+                    seen_picks[dedup_key] = pk
+            entry["picks_list"] = list(seen_picks.values())
+
             if entry["picks_list"] or entry["formula_conf"] in ("Strong Lean", "Solid"):
                 picks.append(entry)
 
@@ -1423,8 +1452,12 @@ with tab_locks:
                 conf_prob = entry["confidence_prob"]
                 conf_label = entry["formula_conf"]
 
-                conf_color_map = {"Strong Lean": "#34d399", "Solid": "#fbbf24", "Lean": "#9ca3af"}
-                conf_c = conf_color_map.get(conf_label, "#9ca3af")
+                _CONF_STYLES = {
+                    "Strong Lean": {"color": "#10b981", "bg": "rgba(16,185,129,0.15)", "border": "rgba(16,185,129,0.5)", "icon": "🟢"},
+                    "Solid":       {"color": "#f59e0b", "bg": "rgba(245,158,11,0.15)", "border": "rgba(245,158,11,0.5)", "icon": "🟡"},
+                    "Lean":        {"color": "#ef4444", "bg": "rgba(239,68,68,0.15)",  "border": "rgba(239,68,68,0.5)",  "icon": "🔴"},
+                }
+                cs = _CONF_STYLES.get(conf_label, _CONF_STYLES["Lean"])
 
                 seeds_a = f"({g['away_team'].get('seed', '')}) " if g.get("away_team", {}).get("seed") else ""
                 seeds_b = f"({g['home_team'].get('seed', '')}) " if g.get("home_team", {}).get("seed") else ""
@@ -1437,9 +1470,10 @@ with tab_locks:
                         models_badge = ' <span class="agree-badge disagree" style="font-size:0.7rem;padding:2px 8px;">Formula vs Historical ML Disagree</span>'
 
                 header_html = (
-                    f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">'
+                    f'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px;">'
                     f'<span style="font-size:1.1rem;font-weight:700;">{seeds_a}{name_a} vs {seeds_b}{name_b}</span>'
-                    f'<span style="color:{conf_c};font-weight:600;font-size:0.85rem;border:1px solid {conf_c};border-radius:12px;padding:2px 10px;">'
+                    f'<span style="color:{cs["color"]};background:{cs["bg"]};font-weight:600;font-size:0.85rem;'
+                    f'border:1px solid {cs["border"]};border-radius:12px;padding:2px 10px;">'
                     f'{conf_label} · {conf_prob:.0%}</span>'
                     f'{models_badge}'
                     f'</div>'
@@ -1449,7 +1483,9 @@ with tab_locks:
                 time_info = g.get("status_detail", "")
                 meta_line = " · ".join([p for p in [round_info, time_info] if p])
 
-                with st.expander(f"{'🔒' if entry['picks_list'] else '📊'} {seeds_a}{name_a} vs {seeds_b}{name_b} — {conf_label} ({conf_prob:.0%})"):
+                expander_icon = cs["icon"]
+                lock_icon = "🔒" if entry["picks_list"] else ""
+                with st.expander(f"{expander_icon} {lock_icon} {seeds_a}{name_a} vs {seeds_b}{name_b} — {conf_label} ({conf_prob:.0%})"):
                     st.markdown(header_html, unsafe_allow_html=True)
                     if meta_line:
                         st.caption(meta_line)

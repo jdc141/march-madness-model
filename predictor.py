@@ -102,8 +102,8 @@ def predict_formula(
     seed_a = _f(team_a, "seed", 8)
     seed_b = _f(team_b, "seed", 8)
 
-    exp_eff_a = 100 + (adj_o_a - 100) - (adj_d_b - 100)
-    exp_eff_b = 100 + (adj_o_b - 100) - (adj_d_a - 100)
+    exp_eff_a = adj_o_a * adj_d_b / _D1_AVG_EFF
+    exp_eff_b = adj_o_b * adj_d_a / _D1_AVG_EFF
 
     poss = (tempo_a + tempo_b) / 2
     score_a = exp_eff_a * poss / 100

@@ -92,8 +92,8 @@ def compute_matchup_stats(
     tempo_proj = (tempo_a + tempo_b) / 2
     seed_diff = seed_b - seed_a
 
-    exp_eff_a = 100 + (adj_o_a - 100) - (adj_d_b - 100)
-    exp_eff_b = 100 + (adj_o_b - 100) - (adj_d_a - 100)
+    exp_eff_a = adj_o_a * adj_d_b / _D1_AVG_EFF
+    exp_eff_b = adj_o_b * adj_d_a / _D1_AVG_EFF
 
     score_a = exp_eff_a * tempo_proj / 100
     score_b = exp_eff_b * tempo_proj / 100
