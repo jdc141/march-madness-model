@@ -13,6 +13,19 @@ ML_FEATURE_NAMES = [
     "seed_diff",
     "sos_diff",
     "luck_diff",
+    "off_efg_diff",
+    "def_efg_diff",
+    "off_to_diff",
+    "off_orb_diff",
+    "fg3_pct_diff",
+    "ft_pct_diff",
+    "experience_diff",
+    "avg_hgt_diff",
+    "bench_diff",
+    "continuity_diff",
+    "stl_rate_diff",
+    "block_pct_diff",
+    "ast_rate_diff",
 ]
 
 _D1_AVG_EFF = 100.0
@@ -110,6 +123,19 @@ def build_ml_features(
         _f(team_b, "seed", 8) - _f(team_a, "seed", 8),
         _f(team_a, "sos", 0) - _f(team_b, "sos", 0),
         _f(team_a, "luck", 0) - _f(team_b, "luck", 0),
+        _f(team_a, "off_efg", 0) - _f(team_b, "off_efg", 0),
+        _f(team_a, "def_efg", 0) - _f(team_b, "def_efg", 0),
+        _f(team_a, "off_to", 0) - _f(team_b, "off_to", 0),
+        _f(team_a, "off_orb", 0) - _f(team_b, "off_orb", 0),
+        _f(team_a, "fg3_pct", 0) - _f(team_b, "fg3_pct", 0),
+        _f(team_a, "ft_pct", 0) - _f(team_b, "ft_pct", 0),
+        _f(team_a, "experience", 0) - _f(team_b, "experience", 0),
+        _f(team_a, "avg_hgt", 0) - _f(team_b, "avg_hgt", 0),
+        _f(team_a, "bench", 0) - _f(team_b, "bench", 0),
+        _f(team_a, "continuity", 0) - _f(team_b, "continuity", 0),
+        _f(team_a, "stl_rate", 0) - _f(team_b, "stl_rate", 0),
+        _f(team_a, "block_pct", 0) - _f(team_b, "block_pct", 0),
+        _f(team_a, "ast_rate", 0) - _f(team_b, "ast_rate", 0),
     ]
 
 

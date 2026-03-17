@@ -1,0 +1,29 @@
+{
+  "model_type": "LogisticRegression",
+  "features": [
+    "adj_em_diff",
+    "adj_o_edge_a",
+    "adj_o_edge_b",
+    "tempo_diff",
+    "seed_diff",
+    "sos_diff",
+    "luck_diff",
+    "off_efg_diff",
+    "def_efg_diff",
+    "off_to_diff",
+    "off_orb_diff",
+    "fg3_pct_diff",
+    "ft_pct_diff",
+    "experience_diff",
+    "avg_hgt_diff",
+    "bench_diff",
+    "continuity_diff",
+    "stl_rate_diff",
+    "block_pct_diff",
+    "ast_rate_diff"
+  ],
+  "training_samples": 9556,
+  "cv_accuracy": 0.6953,
+  "cv_log_loss": 0.5824,
+  "trained_at": "2026-03-17T14:28:26.334719"
+}
