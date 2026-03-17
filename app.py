@@ -279,7 +279,7 @@ with st.sidebar:
     st.divider()
     if st.button("🔄 Refresh Data", use_container_width=True):
         st.cache_data.clear()
-        st.session_state["_lock_stale"] = True
+        st.session_state["_analysis_stale"] = True
         st.rerun()
     st.caption(f"Last refreshed: {datetime.now().strftime('%I:%M %p ET')}")
 
@@ -1030,6 +1030,76 @@ def _get_multi_book_odds(away_name: str, home_name: str) -> dict | None:
     return None
 
 
+def _resolve_team_stats(name: str, ts: dict, ts_keys: list[str]) -> dict | None:
+    """Resolve a team name to loaded team stats once."""
+    if not ts:
+        return None
+    norm = normalize(name)
+    if norm in ts:
+        return ts[norm]
+    match = fuzzy_match(norm, ts_keys)
+    return ts.get(match) if match else None
+
+
+def _build_game_analysis(games: list, ts: dict, m_odds: dict) -> list[dict]:
+    """Precompute matchup predictions once for all heavy tabs."""
+    analyses: list[dict] = []
+    ts_keys = list(ts.keys())
+
+    upcoming = espn_client.filter_games(games, status_filter="Upcoming")
+    if not upcoming:
+        upcoming = games
+
+    for g in upcoming:
+        try:
+            home = g.get("home_team", {})
+            away = g.get("away_team", {})
+
+            sa = _resolve_team_stats(away.get("name", ""), ts, ts_keys)
+            sb = _resolve_team_stats(home.get("name", ""), ts, ts_keys)
+            if not sa or not sb:
+                continue
+
+            sa = dict(sa)
+            sb = dict(sb)
+            sa.setdefault("team", away.get("name", "Team A"))
+            sb.setdefault("team", home.get("name", "Team B"))
+            if away.get("seed"):
+                sa["seed"] = away["seed"]
+            if home.get("seed"):
+                sb["seed"] = home["seed"]
+
+            pred = predict_matchup(sa, sb)
+
+            analyses.append({
+                "game": g,
+                "home": home,
+                "away": away,
+                "stats_a": sa,
+                "stats_b": sb,
+                "name_a": sa["team"],
+                "name_b": sb["team"],
+                "pred": pred,
+                "espn_odds": g.get("odds"),
+                "multi_book": _get_multi_book_odds(away.get("name", ""), home.get("name", "")),
+            })
+        except Exception:
+            continue
+
+    return analyses
+
+
+def _ensure_precomputed_insights(games: list, ts: dict, m_odds: dict) -> None:
+    """Build heavy matchup analysis once per refresh cycle."""
+    if "_analysis_cache" not in st.session_state or st.session_state.get("_analysis_stale", True):
+        with st.spinner("Crunching matchup insights..."):
+            analysis = _build_game_analysis(games, ts, m_odds)
+            st.session_state["_analysis_cache"] = analysis
+            st.session_state["_lock_picks"] = _build_lock_picks(analysis)
+            st.session_state["_upset_picks"] = _build_upset_picks(analysis)
+            st.session_state["_analysis_stale"] = False
+
+
 def _render_news(news: list[dict]) -> None:
     """Render game-related news articles."""
     if not news:
@@ -1249,38 +1319,16 @@ with tab_live:
 # Tab 2: Lock It In
 # ===========================================================================
 
-def _build_lock_picks(games: list, ts: dict, m_odds: dict) -> list[dict]:
-    """Compute all Lock It In picks — called once then cached in session state."""
+def _build_lock_picks(analysis: list[dict]) -> list[dict]:
+    """Build Lock It In picks from shared precomputed matchup analysis."""
     picks: list[dict] = []
 
-    upcoming = espn_client.filter_games(games, status_filter="Upcoming")
-    if not upcoming:
-        upcoming = games
-
-    for g in upcoming:
+    for item in analysis:
         try:
-            home = g.get("home_team", {})
-            away = g.get("away_team", {})
-
-            norm_a = normalize(away.get("name", ""))
-            norm_b = normalize(home.get("name", ""))
-            sa = ts.get(norm_a) or (ts.get(fuzzy_match(norm_a, list(ts.keys()))) if ts else None)
-            sb = ts.get(norm_b) or (ts.get(fuzzy_match(norm_b, list(ts.keys()))) if ts else None)
-            if not sa or not sb:
-                continue
-
-            sa = dict(sa)
-            sb = dict(sb)
-            sa.setdefault("team", away.get("name", "Team A"))
-            sb.setdefault("team", home.get("name", "Team B"))
-            if away.get("seed"):
-                sa["seed"] = away["seed"]
-            if home.get("seed"):
-                sb["seed"] = home["seed"]
-
-            pred = predict_matchup(sa, sb)
-            name_a = sa["team"]
-            name_b = sb["team"]
+            g = item["game"]
+            pred = item["pred"]
+            name_a = item["name_a"]
+            name_b = item["name_b"]
 
             entry = {
                 "game": g,
@@ -1294,16 +1342,8 @@ def _build_lock_picks(games: list, ts: dict, m_odds: dict) -> list[dict]:
                 "picks_list": [],
             }
 
-            espn_odds = g.get("odds")
-            mb = None
-            if m_odds:
-                key = f"{away.get('name', '').lower()} vs {home.get('name', '').lower()}"
-                mb = m_odds.get(key)
-                if mb is None:
-                    for k, v in m_odds.items():
-                        if away.get("name", "").lower() in k and home.get("name", "").lower() in k:
-                            mb = v
-                            break
+            espn_odds = item.get("espn_odds")
+            mb = item.get("multi_book")
 
             _books_map: dict[str, dict] = {}
             if espn_odds and (espn_odds.get("spread") is not None or espn_odds.get("ml_home")):
@@ -1417,13 +1457,8 @@ with tab_locks:
     elif not team_stats:
         st.info("No team data loaded. Connect KenPom API or upload a CSV.")
     else:
-        _lock_cache_key = "_lock_picks"
-        if _lock_cache_key not in st.session_state or st.session_state.get("_lock_stale", True):
-            with st.spinner("Crunching picks across all games..."):
-                st.session_state[_lock_cache_key] = _build_lock_picks(all_games, team_stats, multi_odds)
-                st.session_state["_lock_stale"] = False
-
-        picks = list(st.session_state[_lock_cache_key])
+        _ensure_precomputed_insights(all_games, team_stats, multi_odds)
+        picks = list(st.session_state["_lock_picks"])
 
         if not picks:
             st.info("No high-confidence picks right now. Check back closer to game time when odds are posted.")
@@ -1526,18 +1561,15 @@ with tab_locks:
 # Tab 3: Upset City
 # ===========================================================================
 
-def _build_upset_picks(games: list, ts: dict) -> list[dict]:
-    """Find games where the underdog has a real shot according to the models."""
+def _build_upset_picks(analysis: list[dict]) -> list[dict]:
+    """Find games where the underdog has a real shot from shared analysis."""
     upsets: list[dict] = []
 
-    upcoming = espn_client.filter_games(games, status_filter="Upcoming")
-    if not upcoming:
-        upcoming = games
-
-    for g in upcoming:
+    for item in analysis:
         try:
-            home = g.get("home_team", {})
-            away = g.get("away_team", {})
+            g = item["game"]
+            home = item["home"]
+            away = item["away"]
             seed_a = away.get("seed")
             seed_b = home.get("seed")
 
@@ -1546,22 +1578,11 @@ def _build_upset_picks(games: list, ts: dict) -> list[dict]:
             if seed_a == seed_b:
                 continue
 
-            norm_a = normalize(away.get("name", ""))
-            norm_b = normalize(home.get("name", ""))
-            sa = ts.get(norm_a) or (ts.get(fuzzy_match(norm_a, list(ts.keys()))) if ts else None)
-            sb = ts.get(norm_b) or (ts.get(fuzzy_match(norm_b, list(ts.keys()))) if ts else None)
-            if not sa or not sb:
-                continue
-
-            sa = dict(sa); sb = dict(sb)
-            sa.setdefault("team", away.get("name", "Team A"))
-            sb.setdefault("team", home.get("name", "Team B"))
-            sa["seed"] = seed_a
-            sb["seed"] = seed_b
-
-            pred = predict_matchup(sa, sb)
-            name_a = sa["team"]
-            name_b = sb["team"]
+            sa = item["stats_a"]
+            sb = item["stats_b"]
+            pred = item["pred"]
+            name_a = item["name_a"]
+            name_b = item["name_b"]
 
             # Who's the underdog (higher seed number)?
             if seed_a > seed_b:
@@ -1654,12 +1675,8 @@ with tab_upsets:
     elif not team_stats:
         st.info("No team data loaded. Connect KenPom API or upload a CSV.")
     else:
-        _upset_cache_key = "_upset_picks"
-        if _upset_cache_key not in st.session_state or st.session_state.get("_lock_stale", True):
-            with st.spinner("Scanning for upsets..."):
-                st.session_state[_upset_cache_key] = _build_upset_picks(all_games, team_stats)
-
-        upset_picks = list(st.session_state[_upset_cache_key])
+        _ensure_precomputed_insights(all_games, team_stats, multi_odds)
+        upset_picks = list(st.session_state["_upset_picks"])
 
         _upset_filter = st.selectbox(
             "Filter",
@@ -2106,6 +2123,6 @@ st.markdown(f"""
 @st.fragment(run_every=120)
 def _auto_refresh():
     """Silent fragment that triggers a cache-busting rerun on interval."""
-    st.session_state["_lock_stale"] = True
+    st.session_state["_analysis_stale"] = True
 
 _auto_refresh()
