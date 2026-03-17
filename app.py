@@ -32,7 +32,7 @@ st.set_page_config(
     page_title="March Madness Predictor",
     page_icon="🏀",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ---------------------------------------------------------------------------
@@ -863,6 +863,13 @@ def _render_market_comparison(prediction: MatchupPrediction, espn_odds: dict | N
             st.markdown(f"**{bk['name']}**")
 
             # --- Spread pick ---
+            # model_spread = fair_spread = -margin, from team_a perspective
+            #   negative = team_a is favored, positive = team_a is underdog
+            # mkt_spread from ESPN = the favorite's spread (negative number)
+            #   spread_detail shows who, e.g. "Nebraska -12.5"
+            # We need to figure out which team the market spread applies to
+            # and compare in the same direction.
+
             mkt_spread = bk.get("spread")
             if mkt_spread is not None:
                 try:
@@ -871,19 +878,39 @@ def _render_market_comparison(prediction: MatchupPrediction, espn_odds: dict | N
                     mkt_spread = None
 
             if mkt_spread is not None:
-                spread_edge = model_spread - mkt_spread
                 spread_detail = bk.get("spread_detail", "")
 
-                if abs(spread_edge) >= 1.5:
-                    if spread_edge > 0:
-                        pick_team = name_b
-                        reasoning = f"Market has {spread_detail}, but model says the fair line is {model_spread:+.1f} — {abs(spread_edge):.1f} pts of value on {name_b}"
-                    else:
+                # Determine which team the market spread is on by checking spread_detail
+                # ESPN spread_detail looks like "Nebraska -12.5" or "Troy +12.5"
+                # The raw spread value is always the favorite's number (negative)
+                # Convert mkt_spread to team_a perspective to match model_spread
+                mkt_spread_a = mkt_spread  # default: assume spread is from team_a perspective
+                detail_lower = spread_detail.lower()
+                if name_b.lower() in detail_lower and mkt_spread < 0:
+                    # Market says team_b is favored → from team_a perspective, flip sign
+                    mkt_spread_a = -mkt_spread
+                elif name_a.lower() in detail_lower and mkt_spread < 0:
+                    # Market says team_a is favored → already correct perspective
+                    mkt_spread_a = mkt_spread
+
+                # Both are now from team_a perspective:
+                #   negative = team_a favored, positive = team_a underdog
+                edge = model_spread - mkt_spread_a
+                # positive edge = model thinks team_a should be getting MORE points
+                #   → take team_a (the underdog side / getting points)
+                # negative edge = model thinks team_a should be giving FEWER points
+                #   → take team_b (the underdog side / getting points)
+
+                if abs(edge) >= 1.5:
+                    if edge > 0:
                         pick_team = name_a
-                        reasoning = f"Market has {spread_detail}, but model says the fair line is {model_spread:+.1f} — {abs(spread_edge):.1f} pts of value on {name_a}"
+                        reasoning = f"Market has {spread_detail}, but model says the fair line is {name_a} {model_spread:+.1f} — {abs(edge):.1f} pts of value on {name_a}"
+                    else:
+                        pick_team = name_b
+                        reasoning = f"Market has {spread_detail}, but model says the fair line is {name_a} {model_spread:+.1f} — {abs(edge):.1f} pts of value on {name_b}"
                     st.markdown(_pick_html(f"Take {pick_team} {spread_detail}", reasoning, True), unsafe_allow_html=True)
                 else:
-                    st.markdown(_pick_html(f"Spread: {spread_detail}", f"Model line: {model_spread:+.1f} — no significant edge ({spread_edge:+.1f})", False), unsafe_allow_html=True)
+                    st.markdown(_pick_html(f"Spread: {spread_detail}", f"Model line: {name_a} {model_spread:+.1f} — no significant edge ({edge:+.1f})", False), unsafe_allow_html=True)
             else:
                 st.markdown(_pick_html("Spread: N/A", "No spread available", False), unsafe_allow_html=True)
 
