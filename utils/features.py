@@ -11,21 +11,35 @@ ML_FEATURE_NAMES = [
     "adj_o_edge_b",
     "tempo_diff",
     "seed_diff",
-    "sos_diff",
-    "luck_diff",
+    # Four factors
     "off_efg_diff",
     "def_efg_diff",
     "off_to_diff",
     "off_orb_diff",
+    "off_ftr_diff",
+    "def_to_diff",
+    # Shooting
     "fg3_pct_diff",
+    "fg2_pct_diff",
     "ft_pct_diff",
-    "experience_diff",
+    "fg3_rate_diff",
+    "ast_rate_diff",
+    # Defense
+    "block_pct_diff",
+    "stl_rate_diff",
+    "opp_fg3_pct_diff",
+    "opp_fg2_pct_diff",
+    # Roster
     "avg_hgt_diff",
+    "experience_diff",
     "bench_diff",
     "continuity_diff",
-    "stl_rate_diff",
-    "block_pct_diff",
-    "ast_rate_diff",
+    # Engineered
+    "seed_matchup",
+    "tempo_mismatch",
+    "off_def_asymmetry_a",
+    "off_def_asymmetry_b",
+    "efg_margin",
 ]
 
 _D1_AVG_EFF = 100.0
@@ -115,27 +129,55 @@ def build_ml_features(
     team_b: dict[str, Any],
 ) -> list[float]:
     """Build the feature vector consumed by the ML model."""
+    adj_o_a = _f(team_a, "adj_o", _D1_AVG_EFF)
+    adj_d_a = _f(team_a, "adj_d", _D1_AVG_EFF)
+    adj_o_b = _f(team_b, "adj_o", _D1_AVG_EFF)
+    adj_d_b = _f(team_b, "adj_d", _D1_AVG_EFF)
+    seed_a = _f(team_a, "seed", 8)
+    seed_b = _f(team_b, "seed", 8)
+    off_efg_a = _f(team_a, "off_efg", 0)
+    off_efg_b = _f(team_b, "off_efg", 0)
+    def_efg_a = _f(team_a, "def_efg", 0)
+    def_efg_b = _f(team_b, "def_efg", 0)
+    tempo_a = _f(team_a, "tempo", _D1_AVG_TEMPO)
+    tempo_b = _f(team_b, "tempo", _D1_AVG_TEMPO)
+
     return [
+        # Core efficiency
         _f(team_a, "adj_em", 0) - _f(team_b, "adj_em", 0),
-        _f(team_a, "adj_o", _D1_AVG_EFF) - _f(team_b, "adj_d", _D1_AVG_EFF),
-        _f(team_b, "adj_o", _D1_AVG_EFF) - _f(team_a, "adj_d", _D1_AVG_EFF),
-        _f(team_a, "tempo", _D1_AVG_TEMPO) - _f(team_b, "tempo", _D1_AVG_TEMPO),
-        _f(team_b, "seed", 8) - _f(team_a, "seed", 8),
-        _f(team_a, "sos", 0) - _f(team_b, "sos", 0),
-        _f(team_a, "luck", 0) - _f(team_b, "luck", 0),
-        _f(team_a, "off_efg", 0) - _f(team_b, "off_efg", 0),
-        _f(team_a, "def_efg", 0) - _f(team_b, "def_efg", 0),
+        adj_o_a - adj_d_b,
+        adj_o_b - adj_d_a,
+        tempo_a - tempo_b,
+        seed_b - seed_a,
+        # Four factors
+        off_efg_a - off_efg_b,
+        def_efg_a - def_efg_b,
         _f(team_a, "off_to", 0) - _f(team_b, "off_to", 0),
         _f(team_a, "off_orb", 0) - _f(team_b, "off_orb", 0),
+        _f(team_a, "off_ftr", 0) - _f(team_b, "off_ftr", 0),
+        _f(team_a, "def_to", 0) - _f(team_b, "def_to", 0),
+        # Shooting
         _f(team_a, "fg3_pct", 0) - _f(team_b, "fg3_pct", 0),
+        _f(team_a, "fg2_pct", 0) - _f(team_b, "fg2_pct", 0),
         _f(team_a, "ft_pct", 0) - _f(team_b, "ft_pct", 0),
-        _f(team_a, "experience", 0) - _f(team_b, "experience", 0),
+        _f(team_a, "fg3_rate", 0) - _f(team_b, "fg3_rate", 0),
+        _f(team_a, "ast_rate", 0) - _f(team_b, "ast_rate", 0),
+        # Defense
+        _f(team_a, "block_pct", 0) - _f(team_b, "block_pct", 0),
+        _f(team_a, "stl_rate", 0) - _f(team_b, "stl_rate", 0),
+        _f(team_a, "opp_fg3_pct", 0) - _f(team_b, "opp_fg3_pct", 0),
+        _f(team_a, "opp_fg2_pct", 0) - _f(team_b, "opp_fg2_pct", 0),
+        # Roster
         _f(team_a, "avg_hgt", 0) - _f(team_b, "avg_hgt", 0),
+        _f(team_a, "experience", 0) - _f(team_b, "experience", 0),
         _f(team_a, "bench", 0) - _f(team_b, "bench", 0),
         _f(team_a, "continuity", 0) - _f(team_b, "continuity", 0),
-        _f(team_a, "stl_rate", 0) - _f(team_b, "stl_rate", 0),
-        _f(team_a, "block_pct", 0) - _f(team_b, "block_pct", 0),
-        _f(team_a, "ast_rate", 0) - _f(team_b, "ast_rate", 0),
+        # Engineered
+        seed_a * seed_b,
+        abs(tempo_a - tempo_b),
+        (adj_o_a - adj_d_b) - (adj_o_b - adj_d_a),
+        (adj_o_b - adj_d_a) - (adj_o_a - adj_d_b),
+        (off_efg_a - def_efg_b) - (off_efg_b - def_efg_a),
     ]
 
 

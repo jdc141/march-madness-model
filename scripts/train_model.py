@@ -1,11 +1,10 @@
-"""Train ML model on historical tournament matchup data.
+"""Train ML model on historical tournament matchup data with hyperparameter tuning.
 
 Usage:
     python scripts/train_model.py
 
-Reads data/training_data.csv (built by build_training_data.py), trains
-logistic regression and XGBoost classifiers, evaluates both, and exports
-the best model to models/model.pkl.
+Reads data/training_data.csv, evaluates multiple model configurations, and
+exports the best one to models/model.pkl.
 """
 
 from __future__ import annotations
@@ -19,17 +18,16 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 _MODELS_DIR = Path(__file__).parent.parent / "models"
 _TRAINING_DATA = _DATA_DIR / "training_data.csv"
 
-# Allow imports from project root
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.features import ML_FEATURE_NAMES
 
 
 def main():
@@ -39,92 +37,158 @@ def main():
         sys.exit(1)
 
     df = pd.read_csv(_TRAINING_DATA)
-    print(f"Loaded {len(df)} training samples")
+    feature_cols = [c for c in df.columns if c not in ("team_a_won", "season")]
+    print(f"Loaded {len(df)} training samples, {len(feature_cols)} features")
+    print(f"Seasons: {sorted(df['season'].unique())}")
+    print(f"Win rate: {df['team_a_won'].mean():.3f}")
 
-    X = df[ML_FEATURE_NAMES].values
+    X = df[feature_cols].values
     y = df["team_a_won"].values
 
-    # --- Logistic Regression ---
-    lr_pipe = Pipeline([
-        ("scaler", StandardScaler()),
-        ("lr", LogisticRegression(max_iter=1000, C=1.0)),
-    ])
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
-    lr_acc = cross_val_score(lr_pipe, X, y, cv=5, scoring="accuracy")
-    lr_logloss = -cross_val_score(lr_pipe, X, y, cv=5, scoring="neg_log_loss")
-    lr_brier = -cross_val_score(lr_pipe, X, y, cv=5, scoring="neg_brier_score")
+    results = []
 
-    print(f"\nLogistic Regression (5-fold CV):")
-    print(f"  Accuracy:  {lr_acc.mean():.4f} ± {lr_acc.std():.4f}")
-    print(f"  Log Loss:  {lr_logloss.mean():.4f} ± {lr_logloss.std():.4f}")
-    print(f"  Brier:     {lr_brier.mean():.4f} ± {lr_brier.std():.4f}")
-
-    # --- XGBoost ---
-    xgb_pipe = None
-    xgb_logloss_mean = float("inf")
-    try:
-        from xgboost import XGBClassifier
-
-        xgb_pipe = Pipeline([
+    # --- Logistic Regression variants ---
+    for C in [0.01, 0.1, 0.5, 1.0, 5.0, 10.0]:
+        pipe = Pipeline([
             ("scaler", StandardScaler()),
-            ("xgb", XGBClassifier(
-                n_estimators=200,
-                max_depth=4,
-                learning_rate=0.05,
-                use_label_encoder=False,
-                eval_metric="logloss",
-                verbosity=0,
+            ("lr", LogisticRegression(max_iter=2000, C=C, solver="lbfgs")),
+        ])
+        acc = cross_val_score(pipe, X, y, cv=cv, scoring="accuracy")
+        ll = -cross_val_score(pipe, X, y, cv=cv, scoring="neg_log_loss")
+        results.append({
+            "name": f"LR(C={C})",
+            "pipe": pipe,
+            "acc": acc.mean(),
+            "acc_std": acc.std(),
+            "ll": ll.mean(),
+            "ll_std": ll.std(),
+        })
+
+    # --- Gradient Boosting variants ---
+    for n_est, depth, lr in [(100, 3, 0.1), (200, 4, 0.05), (300, 3, 0.05), (500, 4, 0.03)]:
+        pipe = Pipeline([
+            ("scaler", StandardScaler()),
+            ("gb", GradientBoostingClassifier(
+                n_estimators=n_est, max_depth=depth, learning_rate=lr,
+                subsample=0.8, random_state=42,
             )),
         ])
+        acc = cross_val_score(pipe, X, y, cv=cv, scoring="accuracy")
+        ll = -cross_val_score(pipe, X, y, cv=cv, scoring="neg_log_loss")
+        results.append({
+            "name": f"GB(n={n_est},d={depth},lr={lr})",
+            "pipe": pipe,
+            "acc": acc.mean(),
+            "acc_std": acc.std(),
+            "ll": ll.mean(),
+            "ll_std": ll.std(),
+        })
 
-        xgb_acc = cross_val_score(xgb_pipe, X, y, cv=5, scoring="accuracy")
-        xgb_logloss = -cross_val_score(xgb_pipe, X, y, cv=5, scoring="neg_log_loss")
-        xgb_brier = -cross_val_score(xgb_pipe, X, y, cv=5, scoring="neg_brier_score")
-        xgb_logloss_mean = xgb_logloss.mean()
-
-        print(f"\nXGBoost (5-fold CV):")
-        print(f"  Accuracy:  {xgb_acc.mean():.4f} ± {xgb_acc.std():.4f}")
-        print(f"  Log Loss:  {xgb_logloss.mean():.4f} ± {xgb_logloss.std():.4f}")
-        print(f"  Brier:     {xgb_brier.mean():.4f} ± {xgb_brier.std():.4f}")
-
+    # --- XGBoost variants ---
+    try:
+        from xgboost import XGBClassifier
+        for n_est, depth, lr, sub, col in [
+            (200, 4, 0.05, 0.8, 0.8),
+            (300, 3, 0.05, 0.8, 0.7),
+            (500, 4, 0.03, 0.7, 0.7),
+            (300, 5, 0.05, 0.8, 0.8),
+        ]:
+            pipe = Pipeline([
+                ("scaler", StandardScaler()),
+                ("xgb", XGBClassifier(
+                    n_estimators=n_est, max_depth=depth, learning_rate=lr,
+                    subsample=sub, colsample_bytree=col,
+                    use_label_encoder=False, eval_metric="logloss",
+                    verbosity=0, random_state=42,
+                )),
+            ])
+            acc = cross_val_score(pipe, X, y, cv=cv, scoring="accuracy")
+            ll = -cross_val_score(pipe, X, y, cv=cv, scoring="neg_log_loss")
+            results.append({
+                "name": f"XGB(n={n_est},d={depth},lr={lr})",
+                "pipe": pipe,
+                "acc": acc.mean(),
+                "acc_std": acc.std(),
+                "ll": ll.mean(),
+                "ll_std": ll.std(),
+            })
     except ImportError:
-        print("\nXGBoost not installed, using Logistic Regression only.")
+        print("XGBoost not installed, skipping.")
 
-    # --- Select best model ---
-    if xgb_pipe is not None and xgb_logloss_mean < lr_logloss.mean():
-        best_name = "XGBoost"
-        best_pipe = xgb_pipe
-        best_logloss = xgb_logloss_mean
-        best_acc = xgb_acc.mean()
-    else:
-        best_name = "LogisticRegression"
-        best_pipe = lr_pipe
-        best_logloss = lr_logloss.mean()
-        best_acc = lr_acc.mean()
+    # --- Random Forest ---
+    for n_est, depth in [(200, 6), (500, 8), (300, None)]:
+        pipe = Pipeline([
+            ("scaler", StandardScaler()),
+            ("rf", RandomForestClassifier(
+                n_estimators=n_est, max_depth=depth, random_state=42,
+            )),
+        ])
+        acc = cross_val_score(pipe, X, y, cv=cv, scoring="accuracy")
+        ll = -cross_val_score(pipe, X, y, cv=cv, scoring="neg_log_loss")
+        results.append({
+            "name": f"RF(n={n_est},d={depth})",
+            "pipe": pipe,
+            "acc": acc.mean(),
+            "acc_std": acc.std(),
+            "ll": ll.mean(),
+            "ll_std": ll.std(),
+        })
 
-    print(f"\nBest model: {best_name} (log loss: {best_logloss:.4f})")
+    # --- Print leaderboard ---
+    results.sort(key=lambda r: r["ll"])
+    print(f"\n{'Model':<35} {'Accuracy':>10} {'Log Loss':>12}")
+    print("-" * 60)
+    for r in results:
+        print(f"{r['name']:<35} {r['acc']:.4f}±{r['acc_std']:.4f} {r['ll']:.4f}±{r['ll_std']:.4f}")
 
-    # --- Train on full data and export ---
-    best_pipe.fit(X, y)
+    best = results[0]
+    print(f"\nBest: {best['name']} (log loss: {best['ll']:.4f}, accuracy: {best['acc']:.4f})")
+
+    # --- Leave-one-season-out validation ---
+    print(f"\n{'='*60}")
+    print("Leave-One-Season-Out Validation (best model):")
+    print(f"{'='*60}")
+    seasons = sorted(df["season"].unique())
+    loso_accs = []
+    for held_out in seasons:
+        train_mask = df["season"] != held_out
+        test_mask = df["season"] == held_out
+        X_tr, y_tr = X[train_mask], y[train_mask]
+        X_te, y_te = X[test_mask], y[test_mask]
+        clone = type(best["pipe"])([
+            (name, type(step)(**step.get_params()))
+            for name, step in best["pipe"].steps
+        ])
+        clone.fit(X_tr, y_tr)
+        acc = clone.score(X_te, y_te)
+        loso_accs.append(acc)
+        print(f"  {held_out}: {acc:.4f} ({test_mask.sum()} games)")
+    print(f"  Average: {np.mean(loso_accs):.4f}")
+
+    # --- Train on all data and save ---
+    best["pipe"].fit(X, y)
 
     _MODELS_DIR.mkdir(parents=True, exist_ok=True)
     model_path = _MODELS_DIR / "model.pkl"
-    joblib.dump(best_pipe, model_path)
-    print(f"Model saved: {model_path}")
+    joblib.dump(best["pipe"], model_path)
+    print(f"\nModel saved: {model_path}")
 
     metadata = {
-        "model_type": best_name,
-        "features": ML_FEATURE_NAMES,
+        "model_type": best["name"],
+        "features": feature_cols,
         "training_samples": len(df),
-        "cv_accuracy": round(best_acc, 4),
-        "cv_log_loss": round(best_logloss, 4),
+        "cv_accuracy": round(best["acc"], 4),
+        "cv_log_loss": round(best["ll"], 4),
+        "loso_accuracy": round(np.mean(loso_accs), 4),
         "trained_at": datetime.now().isoformat(),
         "seasons": sorted(df["season"].unique().tolist()),
     }
     meta_path = _MODELS_DIR / "model_metadata.json"
     with open(meta_path, "w") as f:
         json.dump(metadata, f, indent=2)
-    print(f"Metadata saved: {meta_path}")
+    print(f"Metadata: {meta_path}")
 
 
 if __name__ == "__main__":

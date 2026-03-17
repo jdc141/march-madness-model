@@ -1,8 +1,8 @@
-"""Build ML training data from real historical tournament results + KenPom archive snapshots.
+"""Build ML training data from real historical tournament results + full KenPom data.
 
 Fetches actual NCAA tournament game results from ESPN for each season,
-pairs them with pre-tournament KenPom ratings from the archive API,
-computes feature differentials, and writes the result to data/training_data.csv.
+pairs them with pre-tournament KenPom data (ratings + four factors + height
++ misc stats), computes feature differentials, and writes training_data.csv.
 
 Usage:
     python scripts/build_training_data.py
@@ -26,13 +26,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
-from utils.features import ML_FEATURE_NAMES
 from utils.team_names import normalize
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 _OUTPUT_FILE = _DATA_DIR / "training_data.csv"
 
-# Pre-tournament snapshot dates (Selection Sunday) and tournament date ranges
 _SEASONS = {
     2014: {"snapshot": "2014-03-16", "dates": ["20140318", "20140320", "20140321", "20140322", "20140323", "20140327", "20140328", "20140329", "20140330", "20140405", "20140407"]},
     2015: {"snapshot": "2015-03-15", "dates": ["20150317", "20150319", "20150320", "20150321", "20150322", "20150326", "20150327", "20150328", "20150329", "20150404", "20150406"]},
@@ -49,62 +47,159 @@ _SEASONS = {
 
 _ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard"
 
-# KenPom archive field mapping
-_ARCHIVE_FIELD_MAP = {
-    "TeamName": "team",
-    "AdjEM": "adj_em",
-    "AdjOE": "adj_o",
-    "AdjDE": "adj_d",
-    "AdjTempo": "tempo",
-    "Seed": "seed",
-    "RankAdjEM": "rank",
+# Archive ratings field map
+_RATINGS_MAP = {
+    "TeamName": "team", "AdjEM": "adj_em", "AdjOE": "adj_o",
+    "AdjDE": "adj_d", "AdjTempo": "tempo", "Seed": "seed",
 }
 
+# Four factors field map
+_FF_MAP = {
+    "eFG_Pct": "off_efg", "TO_Pct": "off_to", "OR_Pct": "off_orb",
+    "FT_Rate": "off_ftr", "DeFG_Pct": "def_efg", "DTO_Pct": "def_to",
+    "DOR_Pct": "def_orb", "DFT_Rate": "def_ftr",
+}
 
-def _get_kenpom_archive(date_str: str) -> dict[str, dict]:
-    """Fetch KenPom ratings archive for a given date, keyed by normalized name."""
+# Misc stats field map
+_MISC_MAP = {
+    "FG3Pct": "fg3_pct", "FG2Pct": "fg2_pct", "FTPct": "ft_pct",
+    "BlockPct": "block_pct", "StlRate": "stl_rate", "ARate": "ast_rate",
+    "F3GRate": "fg3_rate", "OppFG3Pct": "opp_fg3_pct", "OppFG2Pct": "opp_fg2_pct",
+}
+
+# Height field map
+_HEIGHT_MAP = {
+    "AvgHgt": "avg_hgt", "Exp": "experience", "Bench": "bench",
+    "Continuity": "continuity", "HgtEff": "hgt_eff",
+}
+
+FEATURE_NAMES = [
+    "adj_em_diff",
+    "adj_o_edge_a",
+    "adj_o_edge_b",
+    "tempo_diff",
+    "seed_diff",
+    # Four factors
+    "off_efg_diff",
+    "def_efg_diff",
+    "off_to_diff",
+    "off_orb_diff",
+    "off_ftr_diff",
+    "def_to_diff",
+    # Shooting
+    "fg3_pct_diff",
+    "fg2_pct_diff",
+    "ft_pct_diff",
+    "fg3_rate_diff",
+    "ast_rate_diff",
+    # Defense
+    "block_pct_diff",
+    "stl_rate_diff",
+    "opp_fg3_pct_diff",
+    "opp_fg2_pct_diff",
+    # Roster
+    "avg_hgt_diff",
+    "experience_diff",
+    "bench_diff",
+    "continuity_diff",
+    # Engineered
+    "seed_matchup",         # 1 vs 16, 2 vs 15 interaction
+    "tempo_mismatch",       # absolute tempo difference
+    "off_def_asymmetry_a",  # team_a offense vs team_b defense gap
+    "off_def_asymmetry_b",  # team_b offense vs team_a defense gap
+    "efg_margin",           # (off_efg_a - def_efg_b) - (off_efg_b - def_efg_a)
+]
+
+
+def _get_client():
     from kenpom import KenpomClient
-
     token = os.environ.get("KENPOM_BEARER_TOKEN", "")
     if not token:
         raise ValueError("KENPOM_BEARER_TOKEN not set")
+    return KenpomClient(bearer_token=token)
 
-    client = KenpomClient(bearer_token=token)
-    ratings = client.get_ratings_archive_by_date(date=date_str)
 
-    team_lookup = {}
+def _build_team_dict(raw: dict, field_map: dict) -> dict:
+    out = {}
+    for old_key, new_key in field_map.items():
+        if old_key in raw:
+            out[new_key] = raw[old_key]
+    return out
+
+
+def _get_full_kenpom(season: int, snapshot_date: str) -> dict[str, dict]:
+    """Fetch all KenPom data for a season and merge into one dict per team."""
+    client = _get_client()
+
+    # Ratings archive (snapshot date)
+    ratings = client.get_ratings_archive_by_date(date=snapshot_date)
+    teams: dict[str, dict] = {}
     for r in ratings:
-        mapped = {}
-        for old_key, new_key in _ARCHIVE_FIELD_MAP.items():
-            if old_key in r:
-                mapped[new_key] = r[old_key]
+        name = r.get("TeamName", "")
+        if not name:
+            continue
+        d = _build_team_dict(r, _RATINGS_MAP)
+        d["team"] = name
+        norm = normalize(name)
+        teams[norm] = d
+        teams[name.lower()] = d
 
-        raw_name = r.get("TeamName", "")
-        if raw_name:
-            mapped["team"] = raw_name
-            norm = normalize(raw_name)
-            team_lookup[norm] = mapped
-            team_lookup[raw_name.lower()] = mapped
+    time.sleep(0.5)
 
-    return team_lookup
+    # Four factors (by year — end-of-season data, close enough)
+    try:
+        ff = client.get_four_factors(year=season)
+        for r in ff:
+            name = r.get("TeamName", "")
+            norm = normalize(name)
+            target = teams.get(norm) or teams.get(name.lower())
+            if target:
+                target.update(_build_team_dict(r, _FF_MAP))
+    except Exception as e:
+        print(f"    Four factors failed: {e}")
+
+    time.sleep(0.5)
+
+    # Misc stats
+    try:
+        ms = client.get_misc_stats(year=season)
+        for r in ms:
+            name = r.get("TeamName", "")
+            norm = normalize(name)
+            target = teams.get(norm) or teams.get(name.lower())
+            if target:
+                target.update(_build_team_dict(r, _MISC_MAP))
+    except Exception as e:
+        print(f"    Misc stats failed: {e}")
+
+    time.sleep(0.5)
+
+    # Height / experience
+    try:
+        ht = client.get_height(year=season)
+        for r in ht:
+            name = r.get("TeamName", "")
+            norm = normalize(name)
+            target = teams.get(norm) or teams.get(name.lower())
+            if target:
+                target.update(_build_team_dict(r, _HEIGHT_MAP))
+    except Exception as e:
+        print(f"    Height failed: {e}")
+
+    return teams
 
 
-def _fetch_espn_tournament_games(dates: list[str]) -> list[dict]:
-    """Fetch completed NCAA tournament games from ESPN for given dates."""
+def _fetch_espn_games(dates: list[str]) -> list[dict]:
+    """Fetch completed NCAA tournament games from ESPN."""
     games = []
     seen_ids = set()
-
     for date_str in dates:
         try:
-            resp = requests.get(_ESPN_URL, params={
-                "dates": date_str,
-                "groups": 50,
-                "limit": 100,
-            }, timeout=15)
+            resp = requests.get(_ESPN_URL, params={"dates": date_str, "groups": 50, "limit": 100}, timeout=15)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
-            print(f"    ESPN error for {date_str}: {e}")
+            print(f"    ESPN error {date_str}: {e}")
             continue
 
         for event in data.get("events", []):
@@ -112,13 +207,9 @@ def _fetch_espn_tournament_games(dates: list[str]) -> list[dict]:
             if eid in seen_ids:
                 continue
             seen_ids.add(eid)
-
             comp = event.get("competitions", [{}])[0]
-            status_type = comp.get("status", {}).get("type", {}).get("name", "")
-            if status_type != "STATUS_FINAL":
+            if comp.get("status", {}).get("type", {}).get("name") != "STATUS_FINAL":
                 continue
-
-            # Only NCAA tournament
             season_type = event.get("season", {}).get("type", 0)
             notes = [n.get("headline", "") for n in comp.get("notes", [])]
             is_tourney = season_type == 3 or any(
@@ -127,11 +218,9 @@ def _fetch_espn_tournament_games(dates: list[str]) -> list[dict]:
             )
             if not is_tourney:
                 continue
-
             competitors = comp.get("competitors", [])
             if len(competitors) != 2:
                 continue
-
             teams = {}
             for t in competitors:
                 ha = t.get("homeAway", "")
@@ -142,15 +231,9 @@ def _fetch_espn_tournament_games(dates: list[str]) -> list[dict]:
                     "winner": t.get("winner", False),
                     "seed": t.get("curatedRank", {}).get("current"),
                 }
-
             if "home" in teams and "away" in teams:
-                games.append({
-                    "away": teams["away"],
-                    "home": teams["home"],
-                })
-
+                games.append({"away": teams["away"], "home": teams["home"]})
         time.sleep(0.3)
-
     return games
 
 
@@ -162,31 +245,60 @@ def _g(d: dict, k: str, default: float = 0.0) -> float:
         return default
 
 
-def _build_feature_row(team_a: dict, team_b: dict) -> list[float]:
-    """Build a 20-feature vector. Archive only has core efficiency stats,
-    so four factors / shooting / height features default to 0.0 (no signal,
-    won't help or hurt the model)."""
+def _build_feature_row(a: dict, b: dict) -> list[float]:
+    """Build the full feature vector."""
+    adj_o_a = _g(a, "adj_o", 100)
+    adj_d_a = _g(a, "adj_d", 100)
+    adj_o_b = _g(b, "adj_o", 100)
+    adj_d_b = _g(b, "adj_d", 100)
+    seed_a = _g(a, "seed", 8)
+    seed_b = _g(b, "seed", 8)
+    off_efg_a = _g(a, "off_efg")
+    off_efg_b = _g(b, "off_efg")
+    def_efg_a = _g(a, "def_efg")
+    def_efg_b = _g(b, "def_efg")
+    tempo_a = _g(a, "tempo", 67.5)
+    tempo_b = _g(b, "tempo", 67.5)
+
     return [
-        _g(team_a, "adj_em") - _g(team_b, "adj_em"),
-        _g(team_a, "adj_o", 100) - _g(team_b, "adj_d", 100),
-        _g(team_b, "adj_o", 100) - _g(team_a, "adj_d", 100),
-        _g(team_a, "tempo", 67.5) - _g(team_b, "tempo", 67.5),
-        _g(team_b, "seed", 8) - _g(team_a, "seed", 8),
-        0.0,  # sos (not in archive)
-        0.0,  # luck (not in archive)
-        0.0,  # off_efg_diff
-        0.0,  # def_efg_diff
-        0.0,  # off_to_diff
-        0.0,  # off_orb_diff
-        0.0,  # fg3_pct_diff
-        0.0,  # ft_pct_diff
-        0.0,  # experience_diff
-        0.0,  # avg_hgt_diff
-        0.0,  # bench_diff
-        0.0,  # continuity_diff
-        0.0,  # stl_rate_diff
-        0.0,  # block_pct_diff
-        0.0,  # ast_rate_diff
+        # Core efficiency
+        _g(a, "adj_em") - _g(b, "adj_em"),
+        adj_o_a - adj_d_b,
+        adj_o_b - adj_d_a,
+        tempo_a - tempo_b,
+        seed_b - seed_a,
+        # Four factors
+        off_efg_a - off_efg_b,
+        def_efg_a - def_efg_b,
+        _g(a, "off_to") - _g(b, "off_to"),
+        _g(a, "off_orb") - _g(b, "off_orb"),
+        _g(a, "off_ftr") - _g(b, "off_ftr"),
+        _g(a, "def_to") - _g(b, "def_to"),
+        # Shooting
+        _g(a, "fg3_pct") - _g(b, "fg3_pct"),
+        _g(a, "fg2_pct") - _g(b, "fg2_pct"),
+        _g(a, "ft_pct") - _g(b, "ft_pct"),
+        _g(a, "fg3_rate") - _g(b, "fg3_rate"),
+        _g(a, "ast_rate") - _g(b, "ast_rate"),
+        # Defense
+        _g(a, "block_pct") - _g(b, "block_pct"),
+        _g(a, "stl_rate") - _g(b, "stl_rate"),
+        _g(a, "opp_fg3_pct") - _g(b, "opp_fg3_pct"),
+        _g(a, "opp_fg2_pct") - _g(b, "opp_fg2_pct"),
+        # Roster
+        _g(a, "avg_hgt") - _g(b, "avg_hgt"),
+        _g(a, "experience") - _g(b, "experience"),
+        _g(a, "bench") - _g(b, "bench"),
+        _g(a, "continuity") - _g(b, "continuity"),
+        # Engineered: seed matchup interaction
+        seed_a * seed_b,
+        # Engineered: tempo mismatch
+        abs(tempo_a - tempo_b),
+        # Engineered: offense vs defense asymmetry
+        (adj_o_a - adj_d_b) - (adj_o_b - adj_d_a),
+        (adj_o_b - adj_d_a) - (adj_o_a - adj_d_b),
+        # Engineered: eFG margin
+        (off_efg_a - def_efg_b) - (off_efg_b - def_efg_a),
     ]
 
 
@@ -201,52 +313,46 @@ def main():
         print(f"Season {season} (snapshot: {cfg['snapshot']})")
         print(f"{'='*50}")
 
-        # Fetch KenPom archive
         try:
-            kenpom = _get_kenpom_archive(cfg["snapshot"])
-            print(f"  KenPom: {len(kenpom)} team entries loaded")
+            kenpom = _get_full_kenpom(season, cfg["snapshot"])
+            print(f"  KenPom: {len(kenpom)} entries (ratings + four factors + height + misc)")
         except Exception as e:
-            print(f"  KenPom FAILED: {e} — skipping season")
+            print(f"  KenPom FAILED: {e}")
             continue
 
-        # Fetch ESPN results
-        games = _fetch_espn_tournament_games(cfg["dates"])
-        print(f"  ESPN: {len(games)} completed tournament games found")
+        games = _fetch_espn_games(cfg["dates"])
+        print(f"  ESPN: {len(games)} completed tournament games")
 
         if not games:
-            print("  No games — skipping")
             continue
 
         matched = 0
-        unmatched_teams = set()
+        unmatched = set()
 
         for game in games:
-            away = game["away"]
-            home = game["home"]
+            away, home = game["away"], game["home"]
 
-            # Try multiple name variants to match
             ka = None
-            for name_variant in [away["name"], away["short"], away["name"].lower()]:
-                norm = normalize(name_variant)
-                ka = kenpom.get(norm) or kenpom.get(name_variant.lower())
+            for v in [away["name"], away["short"]]:
+                norm = normalize(v)
+                ka = kenpom.get(norm) or kenpom.get(v.lower())
                 if ka:
                     break
 
             kb = None
-            for name_variant in [home["name"], home["short"], home["name"].lower()]:
-                norm = normalize(name_variant)
-                kb = kenpom.get(norm) or kenpom.get(name_variant.lower())
+            for v in [home["name"], home["short"]]:
+                norm = normalize(v)
+                kb = kenpom.get(norm) or kenpom.get(v.lower())
                 if kb:
                     break
 
-            if ka is None:
-                unmatched_teams.add(away["name"])
+            if not ka:
+                unmatched.add(away["name"])
                 continue
-            if kb is None:
-                unmatched_teams.add(home["name"])
+            if not kb:
+                unmatched.add(home["name"])
                 continue
 
-            # Assign seeds from ESPN if KenPom didn't have them
             if away.get("seed") and away["seed"] != 99:
                 ka["seed"] = away["seed"]
             if home.get("seed") and home["seed"] != 99:
@@ -254,18 +360,16 @@ def main():
 
             features = _build_feature_row(ka, kb)
             team_a_won = 1 if away["winner"] else 0
-
             rows_out.append(features + [team_a_won, season])
             matched += 1
 
         total_games += matched
         seasons_ok += 1
         print(f"  Matched: {matched} games")
-        if unmatched_teams:
-            print(f"  Unmatched teams: {', '.join(sorted(unmatched_teams))}")
+        if unmatched:
+            print(f"  Unmatched: {', '.join(sorted(unmatched))}")
 
-        # Rate limit between seasons
-        time.sleep(1.5)
+        time.sleep(2)
 
     if not rows_out:
         print("\nNo training data generated!")
@@ -274,13 +378,20 @@ def main():
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     with open(_OUTPUT_FILE, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(ML_FEATURE_NAMES + ["team_a_won", "season"])
+        writer.writerow(FEATURE_NAMES + ["team_a_won", "season"])
         writer.writerows(rows_out)
 
+    # Quick check: how many features have actual data
+    import numpy as np
+    arr = np.array([r[:-2] for r in rows_out])
+    nonzero_pct = (arr != 0).mean(axis=0) * 100
     print(f"\n{'='*50}")
-    print(f"DONE: {total_games} real tournament games across {seasons_ok} seasons")
+    print(f"DONE: {total_games} games across {seasons_ok} seasons")
     print(f"Output: {_OUTPUT_FILE}")
-    print(f"Win rate (away team): {sum(r[-2] for r in rows_out) / len(rows_out):.3f}")
+    print(f"Features: {len(FEATURE_NAMES)}")
+    print(f"\nFeature coverage (% non-zero):")
+    for name, pct in zip(FEATURE_NAMES, nonzero_pct):
+        print(f"  {name:30s} {pct:5.1f}%")
 
 
 if __name__ == "__main__":

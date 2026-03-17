@@ -778,7 +778,7 @@ def _render_prediction(prediction: MatchupPrediction, name_a: str, name_b: str, 
 
     if col_ml and ml:
         with col_ml:
-            st.markdown("**Historical KenPom ML** *(trained on 960 real tournament games, 2014–2025)*")
+            st.markdown("**Historical KenPom ML** *(LR+RF ensemble trained on 960 real tournament games, 2014–2025)*")
             mc1, mc2, mc3 = st.columns(3)
             with mc1:
                 st.metric("Winner", ml.predicted_winner)
@@ -792,10 +792,11 @@ def _render_prediction(prediction: MatchupPrediction, name_a: str, name_b: str, 
             "**KenPom Formula** uses this season's KenPom efficiency ratings to project "
             "scores, margin, and win probability through a possession-based formula. "
             "It reflects where teams stand *right now*.\n\n"
-            "**Historical KenPom ML** is a machine learning model (Logistic Regression) "
+            "**Historical KenPom ML** is an ensemble model (Logistic Regression + Random Forest) "
             "trained on **960 real NCAA tournament games from 2014–2025**, using pre-tournament "
-            "KenPom snapshots. It learned which KenPom stat differentials actually predict "
-            "tournament wins from a decade of March Madness results.\n\n"
+            "KenPom snapshots — efficiency ratings, four factors, shooting, height, experience, "
+            "and 5 engineered matchup features. It learned which stat differentials actually predict "
+            "tournament wins from a decade of March Madness data. **~71% accuracy** on cross-validation.\n\n"
             "---\n\n"
             "**Strong Lean** — 65%+ win probability. High-confidence pick.\n\n"
             "**Solid** — 57–65% win probability. Clear advantage, but upset potential exists.\n\n"
