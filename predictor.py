@@ -18,6 +18,11 @@ _CACHED_MODEL = None
 _D1_AVG_EFF = 100.0
 _D1_AVG_TEMPO = 67.5
 
+# Tournament games tend to score ~6% lower than pure efficiency ratings predict.
+# Elite defenses, slower pace in elimination games, and high-stakes execution
+# all compress scoring relative to regular-season KenPom projections.
+_TOURNAMENT_SCORE_FACTOR = 0.94
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -106,10 +111,17 @@ def predict_formula(
     exp_eff_b = adj_o_b * adj_d_a / _D1_AVG_EFF
 
     poss = (tempo_a + tempo_b) / 2
-    score_a = exp_eff_a * poss / 100
-    score_b = exp_eff_b * poss / 100
+    raw_score_a = exp_eff_a * poss / 100
+    raw_score_b = exp_eff_b * poss / 100
 
-    margin = (score_a - score_b) + 0.12 * (seed_b - seed_a)
+    # Margin and win probability use raw scores (preserves accuracy of spread/ML)
+    margin = (raw_score_a - raw_score_b) + 0.12 * (seed_b - seed_a)
+
+    # Apply tournament calibration to displayed scores/total only.
+    # Tournament games score ~6% lower than pure efficiency ratings predict
+    # due to high-stakes defense, tighter game management, and elimination pressure.
+    score_a = raw_score_a * _TOURNAMENT_SCORE_FACTOR
+    score_b = raw_score_b * _TOURNAMENT_SCORE_FACTOR
     total = score_a + score_b
 
     win_prob_a = 1 / (1 + math.exp(-margin / 6.8))

@@ -6,12 +6,17 @@ https://the-odds-api.com/
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import requests
 import streamlit as st
+
+_SNAPSHOT_PATH = Path(__file__).parent.parent / "data" / "odds_snapshot.json"
 
 _BASE = "https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds"
 _log = logging.getLogger(__name__)
@@ -142,3 +147,89 @@ def get_ncaab_odds() -> dict[str, dict[str, Any]]:
             continue
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Odds snapshot — persist pre-game lines so the tracker can grade completed games
+# ---------------------------------------------------------------------------
+
+def load_odds_snapshot() -> dict[str, Any]:
+    """Load the saved odds snapshot from disk. Returns {} if not found."""
+    try:
+        if _SNAPSHOT_PATH.exists():
+            return json.loads(_SNAPSHOT_PATH.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def save_odds_snapshot(
+    games: list[dict[str, Any]],
+    multi_odds: dict[str, Any],
+    pickcenter_fetcher=None,
+) -> None:
+    """
+    Persist pre-game odds for every game that doesn't already have a saved entry.
+
+    - For upcoming ('pre') games: saves ESPN scoreboard odds + Odds API lines.
+    - For completed ('post') games with no snapshot: fetches closing lines from
+      the ESPN pickcenter endpoint via `pickcenter_fetcher(game_id)`.
+
+    Called once per app load after ESPN + Odds API data are fetched.
+    """
+    try:
+        snapshot = load_odds_snapshot()
+        changed = False
+
+        for game in games:
+            game_id = game.get("game_id", "")
+            if not game_id:
+                continue
+            if game_id in snapshot:
+                continue  # already saved
+
+            state = game.get("state", "pre")
+            home = game.get("home_team", {})
+            away = game.get("away_team", {})
+            home_name = home.get("name", "")
+            away_name = away.get("name", "")
+
+            espn_odds = game.get("odds")
+            key_fwd = f"{away_name.lower()} vs {home_name.lower()}"
+            key_rev = f"{home_name.lower()} vs {away_name.lower()}"
+            book_odds = multi_odds.get(key_fwd) or multi_odds.get(key_rev)
+
+            if state == "pre":
+                if not espn_odds and not book_odds:
+                    continue  # no odds yet — will catch next load
+            elif state == "post":
+                # Try ESPN pickcenter for closing lines on completed games
+                if pickcenter_fetcher and not espn_odds:
+                    try:
+                        pc = pickcenter_fetcher(game_id)
+                        if pc:
+                            espn_odds = pc
+                    except Exception:
+                        pass
+                if not espn_odds and not book_odds:
+                    continue
+            else:
+                continue  # skip in-progress games
+
+            snapshot[game_id] = {
+                "game_id":   game_id,
+                "home_team": home_name,
+                "away_team": away_name,
+                "round":     game.get("round", ""),
+                "region":    game.get("region", ""),
+                "saved_at":  datetime.now(timezone.utc).isoformat(),
+                "espn_odds": espn_odds,
+                "book_odds": book_odds,
+            }
+            changed = True
+
+        if changed:
+            _SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            _SNAPSHOT_PATH.write_text(json.dumps(snapshot, indent=2))
+    except Exception as exc:
+        _log.warning("Failed to save odds snapshot: %s", exc)

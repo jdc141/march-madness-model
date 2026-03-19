@@ -332,6 +332,50 @@ _SUMMARY_URL = (
 )
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_game_odds(game_id: str) -> dict[str, Any] | None:
+    """Fetch closing odds from ESPN game summary pickcenter.
+
+    Works for both upcoming and completed games — ESPN keeps pickcenter data
+    even after a game ends (unlike the scoreboard odds field which disappears).
+    Returns a dict in the same format as the scoreboard `odds` field, or None.
+    """
+    if not game_id:
+        return None
+    try:
+        resp = requests.get(_SUMMARY_URL, params={"event": game_id}, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return None
+
+    pickcenter = data.get("pickcenter", [])
+    if not pickcenter:
+        return None
+
+    pc = pickcenter[0]  # DraftKings is priority 1
+
+    result: dict[str, Any] = {}
+
+    spread = pc.get("spread")
+    if spread is not None:
+        result["spread"] = spread                    # home perspective (neg = home favored)
+        result["spread_away_line"] = -spread         # away perspective
+
+    over_under = pc.get("overUnder")
+    if over_under is not None:
+        result["over_under"] = over_under
+
+    home_ml = pc.get("homeTeamOdds", {}).get("moneyLine")
+    away_ml = pc.get("awayTeamOdds", {}).get("moneyLine")
+    if home_ml is not None:
+        result["ml_home"] = home_ml
+    if away_ml is not None:
+        result["ml_away"] = away_ml
+
+    return result if result else None
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def get_game_summary(game_id: str) -> dict[str, Any]:
     """Fetch ESPN game summary including news and stat leaders.

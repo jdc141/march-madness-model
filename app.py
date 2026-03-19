@@ -339,6 +339,13 @@ try:
 except Exception:
     nit_games = []
 
+# Snapshot pre-game odds so the bet tracker can grade completed games later.
+# Runs silently in the background — only saves entries not already on disk.
+try:
+    odds_client.save_odds_snapshot(all_games, multi_odds, pickcenter_fetcher=espn_client.get_game_odds)
+except Exception:
+    pass
+
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
@@ -350,7 +357,7 @@ st.caption("Live NCAA tournament matchup explorer · KenPom ratings · KenPom Fo
 # Tabs
 # ---------------------------------------------------------------------------
 
-tab_live, tab_locks, tab_upsets, tab_bracket, tab_nit, tab_stats, tab_deep_dive, tab_lab = st.tabs([
+tab_live, tab_locks, tab_upsets, tab_bracket, tab_nit, tab_stats, tab_deep_dive, tab_lab, tab_tracker = st.tabs([
     "🏟️ March Madness",
     "🔒 Lock It In",
     "🚨 Upset City",
@@ -359,6 +366,7 @@ tab_live, tab_locks, tab_upsets, tab_bracket, tab_nit, tab_stats, tab_deep_dive,
     "📈 Stats Deep Dive",
     "🔍 Team Profile",
     "🧪 Future Matchup Lab",
+    "📋 Bet Tracker",
 ])
 
 
@@ -2118,6 +2126,693 @@ with tab_lab:
                     _render_full_matchup(sa, sb)
                 else:
                     st.error("Could not load stats for one or both teams.")
+
+
+# ===========================================================================
+# Tab 9: Bet Tracker
+# ===========================================================================
+
+_SPREAD_EDGE_MIN = 1.5   # pts — must match _render_market_comparison
+_TOTAL_EDGE_MIN  = 2.0   # pts
+_ML_EDGE_MIN     = 3.0   # pct
+
+
+_odds_snapshot: dict = {}
+try:
+    _odds_snapshot = odds_client.load_odds_snapshot()
+except Exception:
+    pass
+
+
+def _evaluate_bets_for_game(game: dict) -> dict | None:
+    """
+    For a completed game, run both models, compare to actual result, and
+    return a structured result dict with every bet the models would have
+    recommended plus whether each bet won or lost.
+    Returns None if the game can't be fully evaluated.
+    """
+    if game.get("state") != "post":
+        return None
+
+    home = game.get("home_team", {})
+    away = game.get("away_team", {})
+
+    # Parse final scores
+    try:
+        away_score = int(float(game.get("away_score") or 0))
+        home_score = int(float(game.get("home_score") or 0))
+    except (ValueError, TypeError):
+        return None
+    if away_score == 0 and home_score == 0:
+        return None
+
+    # KenPom lookup
+    sa = _lookup_team(away.get("name", ""))
+    sb = _lookup_team(home.get("name", ""))
+    if not (sa and sb):
+        return None
+
+    sa = dict(sa)
+    sb = dict(sb)
+    sa["team"] = away.get("name", "Team A")
+    sb["team"] = home.get("name", "Team B")
+    sa.setdefault("color", away.get("color", "3b82f6"))
+    sb.setdefault("color", home.get("color", "ef4444"))
+    if away.get("seed"):
+        sa["seed"] = away["seed"]
+    if home.get("seed"):
+        sb["seed"] = home["seed"]
+
+    name_a = sa["team"]  # away
+    name_b = sb["team"]  # home
+
+    # Actual result
+    if home.get("winner") is True:
+        actual_winner = name_b
+    elif away.get("winner") is True:
+        actual_winner = name_a
+    else:
+        actual_winner = name_a if away_score > home_score else name_b
+
+    actual_total = away_score + home_score
+    actual_margin_a = away_score - home_score  # positive = away team won outright
+
+    # Run models
+    try:
+        pred = predict_matchup(sa, sb)
+    except Exception:
+        return None
+
+    f   = pred.formula
+    ml  = pred.ml
+
+    # Odds: prefer live game data, fall back to pre-game snapshot
+    game_id = game.get("game_id", "")
+    odds = game.get("odds") or {}
+    snap = _odds_snapshot.get(game_id, {})
+    if not odds and snap.get("espn_odds"):
+        odds = snap["espn_odds"]
+
+    # Book odds from snapshot (spread/total/ML from DK or FanDuel)
+    snap_book: dict = {}
+    if snap.get("book_odds"):
+        snap_book = snap["book_odds"].get("draftkings") or snap["book_odds"].get("fanduel") or {}
+
+    # Merge snapshot book odds into ESPN odds dict where live data is missing
+    if not odds.get("spread") and snap_book.get("spread") is not None:
+        odds = dict(odds)
+        odds["spread"] = snap_book["spread"]
+    if not odds.get("over_under") and snap_book.get("total") is not None:
+        odds = dict(odds)
+        odds["over_under"] = snap_book["total"]
+    if not odds.get("ml_home") and snap_book.get("ml_home") is not None:
+        odds = dict(odds)
+        odds["ml_home"] = snap_book["ml_home"]
+        odds["ml_away"] = snap_book.get("ml_away", "")
+
+    # Last resort: fetch closing lines from ESPN game summary pickcenter.
+    # This endpoint keeps DraftKings odds even after a game is final — so it
+    # recovers lines for any completed game that wasn't snapshotted beforehand.
+    if game_id and (not odds.get("spread") or not odds.get("over_under")):
+        try:
+            pc = espn_client.get_game_odds(game_id)
+            if pc:
+                odds = dict(odds)
+                if not odds.get("spread") and pc.get("spread") is not None:
+                    odds["spread"] = pc["spread"]
+                if not odds.get("spread_away_line") and pc.get("spread_away_line") is not None:
+                    odds["spread_away_line"] = pc["spread_away_line"]
+                if not odds.get("over_under") and pc.get("over_under") is not None:
+                    odds["over_under"] = pc["over_under"]
+                if not odds.get("ml_home") and pc.get("ml_home") is not None:
+                    odds["ml_home"] = pc["ml_home"]
+                if not odds.get("ml_away") and pc.get("ml_away") is not None:
+                    odds["ml_away"] = pc["ml_away"]
+        except Exception:
+            pass
+
+    bets: list[dict] = []
+
+    # ------------------------------------------------------------------ #
+    # FORMULA MODEL BETS
+    # ------------------------------------------------------------------ #
+
+    # 1. SU pick (always available)
+    bets.append({
+        "model":  "Formula",
+        "type":   "SU",
+        "pick":   f.predicted_winner,
+        "detail": f"{fmt_probability(max(f.win_prob_a, f.win_prob_b))} win prob",
+        "result": "W" if f.predicted_winner == actual_winner else "L",
+    })
+
+    # Parse market lines (may be absent for completed games)
+    _mkt_spread_away: float | None = None
+    _mkt_total: float | None = None
+    _ml_home_raw = odds.get("ml_home", "")
+    _ml_away_raw = odds.get("ml_away", "")
+
+    # Spread: ESPN stores away-team spread in spread_away_line
+    try:
+        _sv = float(odds.get("spread_away_line", "") or "")
+        if -40 < _sv < 40:          # sanity check — real spread, not vig
+            _mkt_spread_away = _sv
+    except (ValueError, TypeError):
+        pass
+
+    # Fallback: main `spread` field is home perspective; negate for away
+    if _mkt_spread_away is None and odds.get("spread") is not None:
+        try:
+            _mkt_spread_away = -float(odds["spread"])
+        except (ValueError, TypeError):
+            pass
+
+    try:
+        _mkt_total = float(odds.get("over_under") or "")
+    except (ValueError, TypeError):
+        pass
+
+    # 2. Spread bet
+    if _mkt_spread_away is not None:
+        model_spread = f.fair_spread           # away-team perspective (negative = away favored)
+        edge = model_spread - _mkt_spread_away
+        if abs(edge) >= _SPREAD_EDGE_MIN:
+            if edge > 0:
+                # Model thinks away is more of an underdog → home has more value
+                pick_team = name_b
+                line_display = f"{name_b} {-_mkt_spread_away:+.1f}"
+                covers = (actual_margin_a + _mkt_spread_away) < 0
+            else:
+                # Model thinks away is less of an underdog → away has more value
+                pick_team = name_a
+                line_display = f"{name_a} {_mkt_spread_away:+.1f}"
+                covers = (actual_margin_a + _mkt_spread_away) > 0
+            bets.append({
+                "model":  "Formula",
+                "type":   "Spread",
+                "pick":   f"{pick_team} {line_display}",
+                "detail": f"Model fair: {f.predicted_winner} -{abs(f.fair_spread):.1f} · {abs(edge):.1f} pt edge",
+                "result": "W" if covers else "L",
+            })
+
+    # 3. Total bet
+    if _mkt_total is not None:
+        total_edge = f.total - _mkt_total
+        if total_edge >= _TOTAL_EDGE_MIN:
+            bets.append({
+                "model":  "Formula",
+                "type":   "Total",
+                "pick":   f"OVER {_mkt_total}",
+                "detail": f"Model: {f.total} pts · +{total_edge:.1f} above line",
+                "result": "W" if actual_total > _mkt_total else "L",
+            })
+        elif total_edge <= -_TOTAL_EDGE_MIN:
+            bets.append({
+                "model":  "Formula",
+                "type":   "Total",
+                "pick":   f"UNDER {_mkt_total}",
+                "detail": f"Model: {f.total} pts · {total_edge:.1f} below line",
+                "result": "W" if actual_total < _mkt_total else "L",
+            })
+
+    # 4. Moneyline value bet
+    if _ml_home_raw and _ml_away_raw:
+        model_prob_a = f.win_prob_a
+        market_ml_a  = _ml_away_raw   # away = team_a
+        market_ml_b  = _ml_home_raw
+        try:
+            _val = float(str(market_ml_a).replace("+", ""))
+            implied_a = 100 / (_val + 100) if _val >= 0 else abs(_val) / (abs(_val) + 100)
+            edge_pct_a = (model_prob_a - implied_a) * 100
+        except (ValueError, ZeroDivisionError):
+            edge_pct_a = 0.0
+        if edge_pct_a > _ML_EDGE_MIN:
+            bets.append({
+                "model":  "Formula",
+                "type":   "ML",
+                "pick":   f"{name_a} ML ({market_ml_a})",
+                "detail": f"Model: {model_prob_a:.0%} · Implied: {implied_a:.0%} · +{edge_pct_a:.1f}% edge",
+                "result": "W" if actual_winner == name_a else "L",
+            })
+        elif edge_pct_a < -_ML_EDGE_MIN:
+            try:
+                _valb = float(str(market_ml_b).replace("+", ""))
+                implied_b = 100 / (_valb + 100) if _valb >= 0 else abs(_valb) / (abs(_valb) + 100)
+            except (ValueError, ZeroDivisionError):
+                implied_b = 1 - implied_a
+            bets.append({
+                "model":  "Formula",
+                "type":   "ML",
+                "pick":   f"{name_b} ML ({market_ml_b})",
+                "detail": f"Model: {1-model_prob_a:.0%} · Implied: {implied_b:.0%} · +{abs(edge_pct_a):.1f}% edge",
+                "result": "W" if actual_winner == name_b else "L",
+            })
+
+    # ------------------------------------------------------------------ #
+    # ML MODEL BETS
+    # ------------------------------------------------------------------ #
+
+    if ml:
+        # 5. ML SU pick
+        bets.append({
+            "model":  "ML",
+            "type":   "SU",
+            "pick":   ml.predicted_winner,
+            "detail": f"{fmt_probability(max(ml.win_prob_a, ml.win_prob_b))} win prob",
+            "result": "W" if ml.predicted_winner == actual_winner else "L",
+        })
+
+        # 6. ML moneyline value bet
+        if _ml_home_raw and _ml_away_raw:
+            ml_prob_a = ml.win_prob_a
+            try:
+                _val = float(str(_ml_away_raw).replace("+", ""))
+                ml_implied_a = 100 / (_val + 100) if _val >= 0 else abs(_val) / (abs(_val) + 100)
+                ml_edge_a = (ml_prob_a - ml_implied_a) * 100
+            except (ValueError, ZeroDivisionError):
+                ml_edge_a = 0.0
+            if ml_edge_a > _ML_EDGE_MIN:
+                bets.append({
+                    "model":  "ML",
+                    "type":   "ML",
+                    "pick":   f"{name_a} ML ({_ml_away_raw})",
+                    "detail": f"Model: {ml_prob_a:.0%} · Implied: {ml_implied_a:.0%} · +{ml_edge_a:.1f}% edge",
+                    "result": "W" if actual_winner == name_a else "L",
+                })
+            elif ml_edge_a < -_ML_EDGE_MIN:
+                try:
+                    _valb = float(str(_ml_home_raw).replace("+", ""))
+                    ml_implied_b = 100 / (_valb + 100) if _valb >= 0 else abs(_valb) / (abs(_valb) + 100)
+                except (ValueError, ZeroDivisionError):
+                    ml_implied_b = 1 - ml_implied_a
+                bets.append({
+                    "model":  "ML",
+                    "type":   "ML",
+                    "pick":   f"{name_b} ML ({_ml_home_raw})",
+                    "detail": f"Model: {1-ml_prob_a:.0%} · Implied: {ml_implied_b:.0%} · +{abs(ml_edge_a):.1f}% edge",
+                    "result": "W" if actual_winner == name_b else "L",
+                })
+
+    seed_a_str = f"({away.get('seed')}) " if away.get("seed") else ""
+    seed_b_str = f"({home.get('seed')}) " if home.get("seed") else ""
+
+    return {
+        "round":         game.get("round", ""),
+        "region":        game.get("region", ""),
+        "matchup":       f"{seed_a_str}{name_a} vs {seed_b_str}{name_b}",
+        "score":         f"{away_score}–{home_score}",
+        "actual_winner": actual_winner,
+        "actual_total":  actual_total,
+        "formula_proj_total": f.total,
+        "has_odds":      _mkt_spread_away is not None or _mkt_total is not None,
+        "odds_source":   "snapshot" if (snap and not game.get("odds")) else "live",
+        "bets":          bets,
+    }
+
+
+with tab_tracker:
+    import pandas as pd
+
+    st.markdown("### 📋 Bet Tracker")
+    st.caption(
+        "Graded record of every actionable bet the models flagged — spread, total (O/U), and moneyline. "
+        "Only bets with a meaningful edge are counted "
+        f"(≥{_SPREAD_EDGE_MIN} pts on spread · ≥{_TOTAL_EDGE_MIN} pts on total · >{_ML_EDGE_MIN}% edge on ML)."
+    )
+
+    completed_games = [g for g in all_games if g.get("state") == "post"]
+
+    if not completed_games:
+        st.info("No completed games yet. Check back once games are being played.")
+    elif not team_stats:
+        st.info("KenPom data not loaded. Connect the API to enable bet tracking.")
+    else:
+        game_results: list[dict] = []
+        for _g in completed_games:
+            _res = _evaluate_bets_for_game(_g)
+            if _res:
+                game_results.append(_res)
+
+        if not game_results:
+            st.warning(
+                "Completed games found but KenPom data couldn't be matched for any. "
+                "Team names may need to sync between ESPN and KenPom."
+            )
+        else:
+            # ---------------------------------------------------------------- #
+            # Helpers
+            # ---------------------------------------------------------------- #
+            all_bets: list[dict] = [
+                {**b, "matchup": r["matchup"], "round": r["round"], "score": r["score"]}
+                for r in game_results
+                for b in r["bets"]
+            ]
+
+            def _record(bets_subset: list[dict]) -> tuple[int, int]:
+                wins = sum(1 for b in bets_subset if b["result"] == "W")
+                return wins, len(bets_subset) - wins
+
+            def _pct(w: int, l: int) -> str:
+                total = w + l
+                return f"{w / total * 100:.0f}%" if total else "—"
+
+            def _pct_float(w: int, l: int) -> float | None:
+                total = w + l
+                return w / total if total else None
+
+            def _metric_label(w: int, l: int) -> str:
+                return f"{w}–{l}  ({_pct(w, l)})"
+
+            formula_bets = [b for b in all_bets if b["model"] == "Formula"]
+            ml_bets      = [b for b in all_bets if b["model"] == "ML"]
+
+            # Bettable markets only (no SU)
+            f_spread  = [b for b in formula_bets if b["type"] == "Spread"]
+            f_total   = [b for b in formula_bets if b["type"] == "Total"]
+            f_ml_bet  = [b for b in formula_bets if b["type"] == "ML"]
+            ml_ml_bet = [b for b in ml_bets      if b["type"] == "ML"]
+
+            # SU accuracy (separate — not a real bet)
+            f_su  = [b for b in formula_bets if b["type"] == "SU"]
+            ml_su = [b for b in ml_bets      if b["type"] == "SU"]
+
+            all_bettable = [b for b in all_bets if b["type"] != "SU"]
+
+            # ---------------------------------------------------------------- #
+            # TOP: Category leaderboard — which model is winning each market
+            # ---------------------------------------------------------------- #
+            sw,   sl   = _record(f_spread)
+            tw,   tl   = _record(f_total)
+            fmw,  fml  = _record(f_ml_bet)
+            mmw,  mml  = _record(ml_ml_bet)
+
+            def _current_streak(bets: list[dict]) -> int:
+                """Return current streak: positive = win streak, negative = loss streak."""
+                if not bets:
+                    return 0
+                last = bets[-1]["result"]
+                count = 0
+                for b in reversed(bets):
+                    if b["result"] == last:
+                        count += 1
+                    else:
+                        break
+                return count if last == "W" else -count
+
+            def _streak_html(streak: int) -> str:
+                if streak == 0:
+                    return ""
+                if streak > 0:
+                    return (
+                        f'<span style="background:rgba(16,185,129,0.15);color:#34d399;'
+                        f'border:1px solid rgba(16,185,129,0.35);border-radius:20px;'
+                        f'padding:2px 10px;font-size:0.75rem;font-weight:700;'
+                        f'white-space:nowrap;">🔥 W{streak}</span>'
+                    )
+                return (
+                    f'<span style="background:rgba(239,68,68,0.12);color:#f87171;'
+                    f'border:1px solid rgba(239,68,68,0.3);border-radius:20px;'
+                    f'padding:2px 10px;font-size:0.75rem;font-weight:700;'
+                    f'white-space:nowrap;">❄️ L{abs(streak)}</span>'
+                )
+
+            def _leader_card(
+                category: str,
+                entries: list[tuple[str, int, int, list[dict]]],
+            ) -> None:
+                """Render a single category leaderboard card.
+
+                entries: list of (model_label, wins, losses, ordered_bets)
+                """
+                # Find the leader (highest hit %)
+                scored = [
+                    (label, w, l, _pct_float(w, l), bets)
+                    for label, w, l, bets in entries
+                    if (w + l) > 0
+                ]
+                if not scored:
+                    st.markdown(
+                        f"""
+                        <div style="background:rgba(30,30,46,0.6);border:1px solid rgba(100,100,140,0.25);
+                                    border-radius:12px;padding:20px 22px 18px 22px;">
+                          <div style="color:#6b7280;font-size:0.72rem;font-weight:700;
+                                      text-transform:uppercase;letter-spacing:0.08em;margin-bottom:14px;">{category}</div>
+                          <div style="color:#4b5563;font-size:1.1rem;font-weight:500;margin-top:4px;">No bets yet</div>
+                          <div style="color:#374151;font-size:0.8rem;margin-top:6px;">
+                            Waiting for a game with sufficient edge
+                          </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    return
+
+                scored.sort(key=lambda x: (x[3] or 0, x[1]), reverse=True)
+                leader_label, lw, ll, lpct, leader_bets = scored[0]
+                is_tied = len(scored) > 1 and scored[0][3] == scored[1][3]
+
+                # Color: green if >50%, amber if exactly 50%, red if <50%
+                if lpct is None:
+                    bar_color = "#6b7280"
+                elif lpct > 0.50:
+                    bar_color = "#10b981"
+                elif lpct == 0.50:
+                    bar_color = "#f59e0b"
+                else:
+                    bar_color = "#ef4444"
+
+                pct_str = f"{lpct * 100:.0f}%" if lpct is not None else "—"
+                record_str = f"{lw}–{ll}"
+                crown = "👑 " if not is_tied else "🤝 "
+
+                # Build comparison rows with per-model streak badges
+                rows_html = ""
+                for label, w, l, pct, bets in scored:
+                    is_leader = label == leader_label
+                    row_color = "#e5e7eb" if is_leader else "#6b7280"
+                    row_weight = "700" if is_leader else "400"
+                    p = f"{pct*100:.0f}%" if pct is not None else "—"
+                    streak = _current_streak(bets)
+                    streak_badge = _streak_html(streak)
+                    rows_html += (
+                        f'<div style="display:flex;justify-content:space-between;align-items:center;'
+                        f'font-size:0.78rem;padding:4px 0;color:{row_color};font-weight:{row_weight};">'
+                        f'  <span style="white-space:nowrap;margin-right:6px;">{label}</span>'
+                        f'  <span style="display:flex;align-items:center;gap:8px;flex-shrink:0;">'
+                        f'    {streak_badge}'
+                        f'    <span style="white-space:nowrap;font-variant-numeric:tabular-nums;">'
+                        f'      {w}–{l} · {p}'
+                        f'    </span>'
+                        f'  </span>'
+                        f'</div>'
+                    )
+
+                # Leader's own streak for the headline
+                leader_streak = _current_streak(leader_bets)
+                streak_badge_headline = _streak_html(leader_streak)
+
+                st.markdown(
+                    f"""
+                    <div style="background:rgba(30,30,46,0.6);border:1px solid rgba(100,100,140,0.25);
+                                border-radius:12px;padding:18px 18px 16px 18px;box-sizing:border-box;">
+                      <div style="color:#6b7280;font-size:0.7rem;font-weight:700;
+                                  text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">
+                        {category}
+                      </div>
+                      <div style="font-size:1.9rem;font-weight:800;color:{bar_color};
+                                  line-height:1;margin-bottom:6px;white-space:nowrap;">
+                        {crown}{pct_str}
+                      </div>
+                      <div style="display:flex;align-items:center;flex-wrap:nowrap;gap:6px;
+                                  color:#e5e7eb;font-size:0.82rem;font-weight:500;
+                                  margin-bottom:14px;white-space:nowrap;overflow:hidden;">
+                        <span style="white-space:nowrap;">{leader_label} · {record_str}</span>
+                        {streak_badge_headline}
+                      </div>
+                      <div style="border-top:1px solid rgba(100,100,140,0.2);padding-top:10px;">
+                        {rows_html}
+                      </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("#### Current Leader by Category")
+            lc1, lc2, lc3 = st.columns(3)
+            with lc1:
+                _leader_card("Spread", [
+                    ("KenPom Formula", sw, sl, f_spread),
+                ])
+            with lc2:
+                _leader_card("Total (O/U)", [
+                    ("KenPom Formula", tw, tl, f_total),
+                ])
+            with lc3:
+                _leader_card("Moneyline", [
+                    ("KenPom Formula", fmw, fml, f_ml_bet),
+                    ("Historical ML",  mmw, mml, ml_ml_bet),
+                ])
+
+            st.divider()
+
+            # ---------------------------------------------------------------- #
+            # DETAIL: Per-model breakdown
+            # ---------------------------------------------------------------- #
+            st.markdown("#### Betting Record by Model")
+
+            head1, head2 = st.columns(2)
+            with head1:
+                st.markdown(
+                    '<div class="section-header" style="color:#a5b4fc;">KenPom Formula</div>',
+                    unsafe_allow_html=True,
+                )
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    st.metric("Spread", _metric_label(sw, sl) if f_spread else "No bets yet")
+                with c2:
+                    st.metric("Total (O/U)", _metric_label(tw, tl) if f_total else "No bets yet")
+                with c3:
+                    st.metric("Moneyline", _metric_label(fmw, fml) if f_ml_bet else "No bets yet")
+            with head2:
+                st.markdown(
+                    '<div class="section-header" style="color:#34d399;">Historical ML Model</div>',
+                    unsafe_allow_html=True,
+                )
+                c4, c5 = st.columns(2)
+                with c4:
+                    st.metric("Moneyline", _metric_label(mmw, mml) if ml_ml_bet else "No bets yet")
+                with c5:
+                    st.metric("Spread / Total", "N/A — ML model only predicts winners")
+
+            st.divider()
+
+            # ---------------------------------------------------------------- #
+            # MAIN LEDGER: bettable markets only
+            # ---------------------------------------------------------------- #
+            st.markdown("#### Game-by-Game Bet Ledger")
+
+            bet_rows = []
+            for r in game_results:
+                for b in r["bets"]:
+                    if b["type"] == "SU":
+                        continue  # excluded from main ledger
+                    icon = "✅" if b["result"] == "W" else "❌"
+                    bet_rows.append({
+                        "Round":   r["round"],
+                        "Matchup": r["matchup"],
+                        "Score":   r["score"],
+                        "Model":   b["model"],
+                        "Type":    b["type"],
+                        "Pick":    b["pick"],
+                        "Detail":  b["detail"],
+                        "Result":  f"{icon} {b['result']}",
+                    })
+
+            if bet_rows:
+                df_bets = pd.DataFrame(bet_rows)
+
+                fc1, fc2, fc3 = st.columns(3)
+                with fc1:
+                    model_filter = st.selectbox("Model", ["All", "Formula", "ML"], key="tracker_model")
+                with fc2:
+                    type_opts = ["All"] + sorted(df_bets["Type"].unique().tolist())
+                    type_filter = st.selectbox("Bet Type", type_opts, key="tracker_type")
+                with fc3:
+                    result_filter = st.selectbox("Result", ["All", "✅ W", "❌ L"], key="tracker_result")
+
+                fdf = df_bets.copy()
+                if model_filter != "All":
+                    fdf = fdf[fdf["Model"] == model_filter]
+                if type_filter != "All":
+                    fdf = fdf[fdf["Type"] == type_filter]
+                if result_filter != "All":
+                    rv = "W" if result_filter == "✅ W" else "L"
+                    fdf = fdf[fdf["Result"].str.endswith(rv)]
+
+                if fdf.empty:
+                    st.info("No bets match the current filters.")
+                else:
+                    fw_f = fdf["Result"].str.endswith("W").sum()
+                    fl_f = fdf["Result"].str.endswith("L").sum()
+                    st.caption(f"Showing {len(fdf)} bet(s) — {fw_f}W / {fl_f}L ({_pct(fw_f, fl_f)} hit rate)")
+                    st.dataframe(
+                        fdf,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Result": st.column_config.TextColumn("Result", width="small"),
+                            "Type":   st.column_config.TextColumn("Type",   width="small"),
+                            "Model":  st.column_config.TextColumn("Model",  width="small"),
+                        },
+                    )
+            else:
+                st.info(
+                    "No edge bets flagged for completed games yet. "
+                    "Bets appear when the model sees ≥1.5 pt spread edge, ≥2 pt total edge, or >3% ML edge."
+                )
+
+            # ---------------------------------------------------------------- #
+            # Round-by-round breakdown (only once multiple rounds played)
+            # ---------------------------------------------------------------- #
+            rounds_played = list(dict.fromkeys(r["round"] for r in game_results if r["round"]))
+            if len(rounds_played) > 1:
+                st.divider()
+                st.markdown("#### Round-by-Round")
+                rnd_rows = []
+                for rnd in rounds_played:
+                    rnd_bets = [b for b in all_bettable if b["round"] == rnd]
+                    for model_name, model_label in [("Formula", "KenPom Formula"), ("ML", "Historical ML")]:
+                        mb = [b for b in rnd_bets if b["model"] == model_name]
+                        if not mb:
+                            continue
+                        w, l = _record(mb)
+                        rnd_rows.append({
+                            "Round": rnd, "Model": model_label,
+                            "Bets": len(mb), "W": w, "L": l, "Hit %": _pct(w, l),
+                        })
+                if rnd_rows:
+                    st.dataframe(pd.DataFrame(rnd_rows), use_container_width=True, hide_index=True)
+
+            # ---------------------------------------------------------------- #
+            # SECONDARY: SU accuracy (collapsible)
+            # ---------------------------------------------------------------- #
+            st.divider()
+            with st.expander("📊 Winner Pick Accuracy (Straight Up)", expanded=False):
+                st.caption(
+                    "Not a bettable market — just how often each model picked the correct winner outright. "
+                    "Useful for gauging overall directional accuracy."
+                )
+                su_cols = st.columns(2)
+                with su_cols[0]:
+                    st.markdown("**KenPom Formula**")
+                    fw_su, fl_su = _record(f_su)
+                    st.metric("SU Record", _metric_label(fw_su, fl_su) if f_su else "No games")
+                with su_cols[1]:
+                    st.markdown("**Historical ML Model**")
+                    mw_su, ml_su_l = _record(ml_su)
+                    st.metric("SU Record", _metric_label(mw_su, ml_su_l) if ml_su else "Model not loaded")
+
+                su_rows = []
+                for r in game_results:
+                    for b in r["bets"]:
+                        if b["type"] != "SU":
+                            continue
+                        icon = "✅" if b["result"] == "W" else "❌"
+                        su_rows.append({
+                            "Round":   r["round"],
+                            "Matchup": r["matchup"],
+                            "Score":   r["score"],
+                            "Model":   b["model"],
+                            "Picked":  b["pick"],
+                            "Detail":  b["detail"],
+                            "Result":  f"{icon} {b['result']}",
+                        })
+                if su_rows:
+                    st.dataframe(
+                        pd.DataFrame(su_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
 
 # ===========================================================================

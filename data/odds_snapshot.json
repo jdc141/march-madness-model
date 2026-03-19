@@ -1,0 +1,701 @@
+{
+  "401856479": {
+    "game_id": "401856479",
+    "home_team": "Ohio St.",
+    "away_team": "TCU",
+    "round": "1st Round",
+    "region": "East",
+    "saved_at": "2026-03-19T01:33:24.065745+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -2.5,
+      "spread_detail": "OSU -2.5",
+      "over_under": 145.5,
+      "ml_home": "-142",
+      "ml_away": "+120",
+      "spread_home_line": "-2.5",
+      "spread_away_line": "+2.5",
+      "total_over_line": "o145.5",
+      "total_under_line": "u145.5"
+    },
+    "book_odds": null
+  },
+  "401856489": {
+    "game_id": "401856489",
+    "home_team": "Nebraska",
+    "away_team": "Troy",
+    "round": "1st Round",
+    "region": "South",
+    "saved_at": "2026-03-19T01:33:24.065775+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -12.5,
+      "spread_detail": "NEB -12.5",
+      "over_under": 137.5,
+      "ml_home": "-1000",
+      "ml_away": "+650",
+      "spread_home_line": "-12.5",
+      "spread_away_line": "+12.5",
+      "total_over_line": "o137.5",
+      "total_under_line": "u137.5"
+    },
+    "book_odds": null
+  },
+  "401856482": {
+    "game_id": "401856482",
+    "home_team": "Louisville",
+    "away_team": "South Florida",
+    "round": "1st Round",
+    "region": "East",
+    "saved_at": "2026-03-19T01:33:24.065778+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -4.5,
+      "spread_detail": "LOU -4.5",
+      "over_under": 163.5,
+      "ml_home": "-198",
+      "ml_away": "+164",
+      "spread_home_line": "-4.5",
+      "spread_away_line": "+4.5",
+      "total_over_line": "o163.5",
+      "total_under_line": "u163.5"
+    },
+    "book_odds": null
+  },
+  "401856480": {
+    "game_id": "401856480",
+    "home_team": "Wisconsin",
+    "away_team": "High Point",
+    "round": "1st Round",
+    "region": "West",
+    "saved_at": "2026-03-19T01:33:24.065781+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -10.5,
+      "spread_detail": "WIS -10.5",
+      "over_under": 163.5,
+      "ml_home": "-485",
+      "ml_away": "+370",
+      "spread_home_line": "-10.5",
+      "spread_away_line": "+10.5",
+      "total_over_line": "o163.5",
+      "total_under_line": "u163.5"
+    },
+    "book_odds": null
+  },
+  "401856478": {
+    "game_id": "401856478",
+    "home_team": "Duke",
+    "away_team": "Siena",
+    "round": "1st Round",
+    "region": "East",
+    "saved_at": "2026-03-19T01:33:24.065784+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -27.5,
+      "spread_detail": "DUKE -27.5",
+      "over_under": 135.5,
+      "ml_home": "-20000",
+      "ml_away": "+3500",
+      "spread_home_line": "-27.5",
+      "spread_away_line": "+27.5",
+      "total_over_line": "o135.5",
+      "total_under_line": "u135.5"
+    },
+    "book_odds": null
+  },
+  "401856488": {
+    "game_id": "401856488",
+    "home_team": "Vanderbilt",
+    "away_team": "McNeese",
+    "round": "1st Round",
+    "region": "South",
+    "saved_at": "2026-03-19T01:33:24.065787+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -11.5,
+      "spread_detail": "VAN -11.5",
+      "over_under": 149.5,
+      "ml_home": "-750",
+      "ml_away": "+525",
+      "spread_home_line": "-11.5",
+      "spread_away_line": "+11.5",
+      "total_over_line": "o149.5",
+      "total_under_line": "u149.5"
+    },
+    "book_odds": null
+  },
+  "401856483": {
+    "game_id": "401856483",
+    "home_team": "Michigan St.",
+    "away_team": "North Dakota St.",
+    "round": "1st Round",
+    "region": "East",
+    "saved_at": "2026-03-19T01:33:24.065790+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -16.5,
+      "spread_detail": "MSU -16.5",
+      "over_under": 143.5,
+      "ml_home": "-1800",
+      "ml_away": "+1000",
+      "spread_home_line": "-16.5",
+      "spread_away_line": "+16.5",
+      "total_over_line": "o143.5",
+      "total_under_line": "u143.5"
+    },
+    "book_odds": null
+  },
+  "401856481": {
+    "game_id": "401856481",
+    "home_team": "Arkansas",
+    "away_team": "Hawai'i",
+    "round": "1st Round",
+    "region": "West",
+    "saved_at": "2026-03-19T01:33:24.065792+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -15.5,
+      "spread_detail": "ARK -15.5",
+      "over_under": 159.5,
+      "ml_home": "-1450",
+      "ml_away": "+850",
+      "spread_home_line": "-15.5",
+      "spread_away_line": "+15.5",
+      "total_over_line": "o159.5",
+      "total_under_line": "u159.5"
+    },
+    "book_odds": null
+  },
+  "401856490": {
+    "game_id": "401856490",
+    "home_team": "UNC",
+    "away_team": "VCU",
+    "round": "1st Round",
+    "region": "South",
+    "saved_at": "2026-03-19T01:33:24.065795+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -2.5,
+      "spread_detail": "UNC -2.5",
+      "over_under": 152.5,
+      "ml_home": "-148",
+      "ml_away": "+124",
+      "spread_home_line": "-2.5",
+      "spread_away_line": "+2.5",
+      "total_over_line": "o152.5",
+      "total_under_line": "u152.5"
+    },
+    "book_odds": null
+  },
+  "401856486": {
+    "game_id": "401856486",
+    "home_team": "Michigan",
+    "away_team": "Howard",
+    "round": "1st Round",
+    "region": "Midwest",
+    "saved_at": "2026-03-19T01:33:24.065797+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -31.5,
+      "spread_detail": "MICH -31.5",
+      "over_under": 151.5,
+      "ml_home": "-20000",
+      "ml_away": "+3500",
+      "spread_home_line": "-31.5",
+      "spread_away_line": "+31.5",
+      "total_over_line": "o151.5",
+      "total_under_line": "u151.5"
+    },
+    "book_odds": null
+  },
+  "401856484": {
+    "game_id": "401856484",
+    "home_team": "BYU",
+    "away_team": "Texas",
+    "round": "1st Round",
+    "region": "West",
+    "saved_at": "2026-03-19T01:33:24.065799+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -2.5,
+      "spread_detail": "BYU -2.5",
+      "over_under": 157.5,
+      "ml_home": "-135",
+      "ml_away": "+114",
+      "spread_home_line": "-2.5",
+      "spread_away_line": "+2.5",
+      "total_over_line": "o157.5",
+      "total_under_line": "u157.5"
+    },
+    "book_odds": null
+  },
+  "401856492": {
+    "game_id": "401856492",
+    "home_team": "Saint Mary's",
+    "away_team": "Texas A&M",
+    "round": "1st Round",
+    "region": "South",
+    "saved_at": "2026-03-19T01:33:24.065802+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -3.5,
+      "spread_detail": "SMC -3.5",
+      "over_under": 147.5,
+      "ml_home": "-162",
+      "ml_away": "+136",
+      "spread_home_line": "-3.5",
+      "spread_away_line": "+3.5",
+      "total_over_line": "o147.5",
+      "total_under_line": "u147.5"
+    },
+    "book_odds": null
+  },
+  "401856491": {
+    "game_id": "401856491",
+    "home_team": "Illinois",
+    "away_team": "Penn",
+    "round": "1st Round",
+    "region": "South",
+    "saved_at": "2026-03-19T01:33:24.065804+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -25.5,
+      "spread_detail": "ILL -25.5",
+      "over_under": 151.5,
+      "ml_home": "-8000",
+      "ml_away": "+2200",
+      "spread_home_line": "-25.5",
+      "spread_away_line": "+25.5",
+      "total_over_line": "o151.5",
+      "total_under_line": "u151.5"
+    },
+    "book_odds": null
+  },
+  "401856487": {
+    "game_id": "401856487",
+    "home_team": "Georgia",
+    "away_team": "Saint Louis",
+    "round": "1st Round",
+    "region": "Midwest",
+    "saved_at": "2026-03-19T01:33:24.065806+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -2.5,
+      "spread_detail": "UGA -2.5",
+      "over_under": 169.5,
+      "ml_home": "-148",
+      "ml_away": "+124",
+      "spread_home_line": "-2.5",
+      "spread_away_line": "+2.5",
+      "total_over_line": "o169.5",
+      "total_under_line": "u169.5"
+    },
+    "book_odds": null
+  },
+  "401856485": {
+    "game_id": "401856485",
+    "home_team": "Gonzaga",
+    "away_team": "Kennesaw St.",
+    "round": "1st Round",
+    "region": "West",
+    "saved_at": "2026-03-19T01:33:24.065808+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -21.5,
+      "spread_detail": "GONZ -21.5",
+      "over_under": 154.5,
+      "ml_home": "-4000",
+      "ml_away": "+1600",
+      "spread_home_line": "-21.5",
+      "spread_away_line": "+21.5",
+      "total_over_line": "o154.5",
+      "total_under_line": "u154.5"
+    },
+    "book_odds": null
+  },
+  "401856493": {
+    "game_id": "401856493",
+    "home_team": "Houston",
+    "away_team": "Idaho",
+    "round": "1st Round",
+    "region": "South",
+    "saved_at": "2026-03-19T01:33:24.065810+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -23.5,
+      "spread_detail": "HOU -23.5",
+      "over_under": 138.5,
+      "ml_home": "-8000",
+      "ml_away": "+2200",
+      "spread_home_line": "-23.5",
+      "spread_away_line": "+23.5",
+      "total_over_line": "o138.5",
+      "total_under_line": "u138.5"
+    },
+    "book_odds": null
+  },
+  "401856525": {
+    "game_id": "401856525",
+    "home_team": "Kentucky",
+    "away_team": "Santa Clara",
+    "round": "1st Round",
+    "region": "Midwest",
+    "saved_at": "2026-03-19T01:33:24.065814+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -3.5,
+      "spread_detail": "UK -3.5",
+      "over_under": 160.5,
+      "ml_home": "-162",
+      "ml_away": "+136",
+      "spread_home_line": "-3.5",
+      "spread_away_line": "+3.5",
+      "total_over_line": "o160.5",
+      "total_under_line": "u160.5"
+    },
+    "book_odds": null
+  },
+  "401856520": {
+    "game_id": "401856520",
+    "home_team": "Texas Tech",
+    "away_team": "Akron",
+    "round": "1st Round",
+    "region": "Midwest",
+    "saved_at": "2026-03-19T01:33:24.065817+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -7.5,
+      "spread_detail": "TTU -7.5",
+      "over_under": 156.5,
+      "ml_home": "-325",
+      "ml_away": "+260",
+      "spread_home_line": "-7.5",
+      "spread_away_line": "+7.5",
+      "total_over_line": "o156.5",
+      "total_under_line": "u156.5"
+    },
+    "book_odds": null
+  },
+  "401856529": {
+    "game_id": "401856529",
+    "home_team": "Arizona",
+    "away_team": "LIU",
+    "round": "1st Round",
+    "region": "West",
+    "saved_at": "2026-03-19T01:33:24.065819+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -30.5,
+      "spread_detail": "ARIZ -30.5",
+      "over_under": 150.5,
+      "ml_home": "-100000",
+      "ml_away": "+5000",
+      "spread_home_line": "-30.5",
+      "spread_away_line": "+30.5",
+      "total_over_line": "o150.5",
+      "total_under_line": "u150.5"
+    },
+    "book_odds": null
+  },
+  "401856526": {
+    "game_id": "401856526",
+    "home_team": "Virginia",
+    "away_team": "Wright St.",
+    "round": "1st Round",
+    "region": "Midwest",
+    "saved_at": "2026-03-19T01:33:24.065821+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -18.5,
+      "spread_detail": "UVA -18.5",
+      "over_under": 145.5,
+      "ml_home": "-2800",
+      "ml_away": "+1300",
+      "spread_home_line": "-18.5",
+      "spread_away_line": "+18.5",
+      "total_over_line": "o145.5",
+      "total_under_line": "u145.5"
+    },
+    "book_odds": null
+  },
+  "401856524": {
+    "game_id": "401856524",
+    "home_team": "Iowa St.",
+    "away_team": "Tennessee St.",
+    "round": "1st Round",
+    "region": "Midwest",
+    "saved_at": "2026-03-19T01:33:24.065823+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -24.5,
+      "spread_detail": "ISU -24.5",
+      "over_under": 149.5,
+      "ml_home": "-8000",
+      "ml_away": "+2200",
+      "spread_home_line": "-24.5",
+      "spread_away_line": "+24.5",
+      "total_over_line": "o149.5",
+      "total_under_line": "u149.5"
+    },
+    "book_odds": null
+  },
+  "401856521": {
+    "game_id": "401856521",
+    "home_team": "Alabama",
+    "away_team": "Hofstra Pride",
+    "round": "1st Round",
+    "region": "Midwest",
+    "saved_at": "2026-03-19T01:33:24.065826+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -11.5,
+      "spread_detail": "ALA -11.5",
+      "over_under": 159.5,
+      "ml_home": "-800",
+      "ml_away": "+550",
+      "spread_home_line": "-11.5",
+      "spread_away_line": "+11.5",
+      "total_over_line": "o159.5",
+      "total_under_line": "u159.5"
+    },
+    "book_odds": null
+  },
+  "401856528": {
+    "game_id": "401856528",
+    "home_team": "Villanova",
+    "away_team": "Utah St.",
+    "round": "1st Round",
+    "region": "West",
+    "saved_at": "2026-03-19T01:33:24.065828+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": 1.5,
+      "spread_detail": "USU -1.5",
+      "over_under": 146.5,
+      "ml_home": "+105",
+      "ml_away": "-125",
+      "spread_home_line": "+1.5",
+      "spread_away_line": "-1.5",
+      "total_over_line": "o146.5",
+      "total_under_line": "u146.5"
+    },
+    "book_odds": null
+  },
+  "401856522": {
+    "game_id": "401856522",
+    "home_team": "Clemson",
+    "away_team": "Iowa Hawkeyes",
+    "round": "1st Round",
+    "region": "South",
+    "saved_at": "2026-03-19T01:33:24.065831+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": 2.5,
+      "spread_detail": "IOWA -2.5",
+      "over_under": 128.5,
+      "ml_home": "+114",
+      "ml_away": "-135",
+      "spread_home_line": "+2.5",
+      "spread_away_line": "-2.5",
+      "total_over_line": "o128.5",
+      "total_under_line": "u128.5"
+    },
+    "book_odds": null
+  },
+  "401856494": {
+    "game_id": "401856494",
+    "home_team": "St. John's",
+    "away_team": "UNI",
+    "round": "1st Round",
+    "region": "East",
+    "saved_at": "2026-03-19T01:33:24.065833+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -9.5,
+      "spread_detail": "SJU -9.5",
+      "over_under": 131.5,
+      "ml_home": "-535",
+      "ml_away": "+400",
+      "spread_home_line": "-9.5",
+      "spread_away_line": "+9.5",
+      "total_over_line": "o131.5",
+      "total_under_line": "u131.5"
+    },
+    "book_odds": null
+  },
+  "401856496": {
+    "game_id": "401856496",
+    "home_team": "UCLA",
+    "away_team": "UCF",
+    "round": "1st Round",
+    "region": "East",
+    "saved_at": "2026-03-19T01:33:24.065836+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -5.5,
+      "spread_detail": "UCLA -5.5",
+      "over_under": 152.5,
+      "ml_home": "-245",
+      "ml_away": "+200",
+      "spread_home_line": "-5.5",
+      "spread_away_line": "+5.5",
+      "total_over_line": "o152.5",
+      "total_under_line": "u152.5"
+    },
+    "book_odds": null
+  },
+  "401856519": {
+    "game_id": "401856519",
+    "home_team": "Purdue",
+    "away_team": "Queens",
+    "round": "1st Round",
+    "region": "West",
+    "saved_at": "2026-03-19T01:33:24.065838+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -25.5,
+      "spread_detail": "PUR -25.5",
+      "over_under": 163.5,
+      "ml_home": "-8000",
+      "ml_away": "+2200",
+      "spread_home_line": "-25.5",
+      "spread_away_line": "+25.5",
+      "total_over_line": "o163.5",
+      "total_under_line": "u163.5"
+    },
+    "book_odds": null
+  },
+  "401856523": {
+    "game_id": "401856523",
+    "home_team": "Florida",
+    "away_team": "Prairie View A&M",
+    "round": "1st Round",
+    "region": "South",
+    "saved_at": "2026-03-19T01:33:24.065841+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -33.5,
+      "spread_detail": "FLA -33.5",
+      "over_under": 156.5,
+      "ml_home": "-100000",
+      "ml_away": "+5000",
+      "spread_home_line": "-33.5",
+      "spread_away_line": "+33.5",
+      "total_over_line": "o156.5",
+      "total_under_line": "u156.5"
+    },
+    "book_odds": null
+  },
+  "401856495": {
+    "game_id": "401856495",
+    "home_team": "Kansas",
+    "away_team": "Cal Baptist",
+    "round": "1st Round",
+    "region": "East",
+    "saved_at": "2026-03-19T01:33:24.065843+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -14.5,
+      "spread_detail": "KU -14.5",
+      "over_under": 138.5,
+      "ml_home": "-1200",
+      "ml_away": "+750",
+      "spread_home_line": "-14.5",
+      "spread_away_line": "+14.5",
+      "total_over_line": "o138.5",
+      "total_under_line": "u138.5"
+    },
+    "book_odds": null
+  },
+  "401856497": {
+    "game_id": "401856497",
+    "home_team": "UConn",
+    "away_team": "Furman",
+    "round": "1st Round",
+    "region": "East",
+    "saved_at": "2026-03-19T01:33:24.065846+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -20.5,
+      "spread_detail": "CONN -20.5",
+      "over_under": 136.5,
+      "ml_home": "-4500",
+      "ml_away": "+1700",
+      "spread_home_line": "-20.5",
+      "spread_away_line": "+20.5",
+      "total_over_line": "o136.5",
+      "total_under_line": "u136.5"
+    },
+    "book_odds": null
+  },
+  "401856518": {
+    "game_id": "401856518",
+    "home_team": "Miami FL",
+    "away_team": "Missouri",
+    "round": "1st Round",
+    "region": "West",
+    "saved_at": "2026-03-19T01:33:24.065848+00:00",
+    "espn_odds": {
+      "provider": "Draft Kings",
+      "spread": -1.5,
+      "spread_detail": "MIA -1.5",
+      "over_under": 147.5,
+      "ml_home": "-130",
+      "ml_away": "+110",
+      "spread_home_line": "-1.5",
+      "spread_away_line": "+1.5",
+      "total_over_line": "o147.5",
+      "total_under_line": "u147.5"
+    },
+    "book_odds": null
+  },
+  "401856437": {
+    "game_id": "401856437",
+    "home_team": "Lehigh",
+    "away_team": "Prairie View A&M",
+    "round": "First Four",
+    "region": "South",
+    "saved_at": "2026-03-19T02:06:52.909421+00:00",
+    "espn_odds": {
+      "spread": -3.5,
+      "spread_away_line": 3.5,
+      "over_under": 140.5,
+      "ml_home": -166,
+      "ml_away": 140
+    },
+    "book_odds": null
+  },
+  "401856434": {
+    "game_id": "401856434",
+    "home_team": "N.C. State",
+    "away_team": "Texas",
+    "round": "First Four",
+    "region": "West",
+    "saved_at": "2026-03-19T02:06:53.099410+00:00",
+    "espn_odds": {
+      "spread": -1.5,
+      "spread_away_line": 1.5,
+      "over_under": 157.5,
+      "ml_home": -120,
+      "ml_away": 100
+    },
+    "book_odds": null
+  },
+  "401856435": {
+    "game_id": "401856435",
+    "home_team": "Howard",
+    "away_team": "UMBC",
+    "round": "First Four",
+    "region": "Midwest",
+    "saved_at": "2026-03-19T02:06:53.284870+00:00",
+    "espn_odds": {
+      "spread": -1.5,
+      "spread_away_line": 1.5,
+      "over_under": 143.5,
+      "ml_home": -112,
+      "ml_away": -108
+    },
+    "book_odds": null
+  }
+}
